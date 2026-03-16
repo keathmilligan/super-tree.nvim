@@ -58,6 +58,60 @@ function M.create_or_get_buffer()
   return M.sidebar_buf
 end
 
+-- Guard the sidebar window against buffer replacement.
+-- Call this once after the sidebar window is created.
+-- If any buffer other than the sidebar buffer enters the sidebar window,
+-- the sidebar buffer is restored and the foreign buffer is redirected to
+-- the nearest non-sidebar window (opening a new split if none exists).
+function M.guard_window(win, buf)
+  vim.api.nvim_create_autocmd("BufEnter", {
+    callback = function()
+      -- Only act when the sidebar window is still open.
+      if not (win and vim.api.nvim_win_is_valid(win)) then
+        return true -- remove this autocmd
+      end
+
+      local current_win = vim.api.nvim_get_current_win()
+      if current_win ~= win then return end
+
+      local entered_buf = vim.api.nvim_get_current_buf()
+      if entered_buf == buf then return end
+
+      -- A foreign buffer has entered the sidebar window.  Redirect it.
+      vim.schedule(function()
+        if not (win and vim.api.nvim_win_is_valid(win)) then return end
+        if vim.api.nvim_get_current_win() ~= win then return end
+
+        -- Restore the sidebar buffer in the sidebar window.
+        vim.api.nvim_win_set_buf(win, buf)
+
+        -- Find an existing non-sidebar window to send the buffer to.
+        local target_win = nil
+        for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+          if w ~= win and vim.api.nvim_win_is_valid(w) then
+            local wb = vim.api.nvim_win_get_buf(w)
+            local bt = vim.bo[wb].buftype
+            if bt == "" or bt == "acwrite" then
+              target_win = w
+              break
+            end
+          end
+        end
+
+        if target_win then
+          vim.api.nvim_set_current_win(target_win)
+          vim.api.nvim_win_set_buf(target_win, entered_buf)
+        else
+          -- No suitable window exists; open a new split to the right of the sidebar.
+          vim.api.nvim_set_current_win(win)
+          vim.cmd("rightbelow vertical split")
+          vim.api.nvim_win_set_buf(vim.api.nvim_get_current_win(), entered_buf)
+        end
+      end)
+    end,
+  })
+end
+
 -- ---------------------------------------------------------------------------
 -- Window creation
 -- ---------------------------------------------------------------------------
@@ -89,6 +143,8 @@ function M.create_floating_window(buf, width)
   vim.wo[win].sidescrolloff  = 0
   vim.wo[win].statusline     = ""
 
+  M.guard_window(win, buf)
+
   return win
 end
 
@@ -110,6 +166,8 @@ function M.create_pinned_window(buf, width)
   vim.wo[win].winfixwidth    = true
   vim.wo[win].winfixheight   = true
   vim.wo[win].statusline     = " Tree Sidebar"
+
+  M.guard_window(win, buf)
 
   return win
 end
