@@ -52,6 +52,8 @@ local config = {
   },
   git = {
     enable = true,
+    -- Two-line layout for git workspaces in the tree (name, then branch/status).
+    multiline = true,
     status = {
       enable = true,  -- git status symbols, branch names, repo summaries
       symbols = {
@@ -127,9 +129,7 @@ end
 
 local function get_current_entry()
   local cursor = vim.api.nvim_win_get_cursor(window.sidebar_win)
-  local row = cursor[1]
-  -- Header lines (root, optional git status line) precede tree entries.
-  return tree.tree_data[row - tree.header_lines]
+  return tree.entry_at_row(cursor[1])
 end
 
 local function toggle_dir(entry)
@@ -633,6 +633,24 @@ function M.setup(opts)
       end
     end,
   })
+
+  -- Re-render when the sidebar width changes so repo branch names can
+  -- hide/show instead of overlapping the path.
+  local function rerender_on_resize()
+    if window.is_open() then
+      tree.render(window.sidebar_buf, config)
+    end
+  end
+  vim.api.nvim_create_autocmd("VimResized", {
+    group    = group,
+    callback = rerender_on_resize,
+  })
+  if vim.fn.exists("##WinResized") == 1 then
+    vim.api.nvim_create_autocmd("WinResized", {
+      group    = group,
+      callback = rerender_on_resize,
+    })
+  end
 
   vim.api.nvim_create_autocmd("DiagnosticChanged", {
     group    = group,

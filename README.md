@@ -134,6 +134,7 @@ require("super-tree").setup({
   },
   git = {
     enable = true,
+    multiline = true, -- two-line layout for git workspaces in the tree
     status = {
       enable = true,
       symbols = {
@@ -171,8 +172,7 @@ Right-aligned virtual text in muted colors:
 
 - **Files**: porcelain symbol; name tinted to match
 - **Directories**: highest-priority child status (conflict > untracked > modified > added > deleted > renamed)
-- **Repos**: branch plus ahead/behind and change counts
-- **Root** (when cwd is a repo): left — branch, upstream, ahead/behind, stash; right — lines added/removed and staged/unstaged breakdowns
+- **Repos** (`git.multiline = true`, default): two lines like the cwd root — name on the first, branch/upstream/ahead/behind/stash on the left of the second, line diffstat and change breakdowns on the right. Set `multiline = false` for a single-line compact summary.
 
 Refreshed in the background from directory watchers, git-dir watchers, and `BufWritePost`.
 

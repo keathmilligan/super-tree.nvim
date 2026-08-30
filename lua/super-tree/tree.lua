@@ -12,6 +12,7 @@ M.tree_data      = {}  -- flat ordered list of visible entry tables
 M.expanded_paths = {}  -- set of expanded directory paths
 M.cwd_name       = ""  -- basename of cwd, shown as the root line
 M.header_lines   = 1   -- buffer lines before tree entries (root + git status)
+M.row_entry      = {}  -- 1-based buffer row -> tree entry (status lines map to the repo dir)
 M.show_hidden    = false  -- when true, filtered_items filters are bypassed
 M.search_pattern = nil    -- live / submitted filter term, or nil
 M.search_matches = nil    -- abs paths of the current search hits
@@ -232,14 +233,19 @@ function M.build_tree(config)
 end
 
 -- Buffer row (1-based) where `path` is displayed, or nil when not visible.
--- Uses header_lines from the most recent render.
+-- Returns the first row of the node (the name line, not a git status line).
 function M.row_for_path(path)
-  for i, entry in ipairs(M.tree_data) do
-    if entry.path == path then
-      return i + M.header_lines
+  local best = nil
+  for row, entry in pairs(M.row_entry) do
+    if entry.path == path and (not best or row < best) then
+      best = row
     end
   end
-  return nil
+  return best
+end
+
+function M.entry_at_row(row)
+  return M.row_entry[row]
 end
 
 -- ---------------------------------------------------------------------------
@@ -269,6 +275,27 @@ local function build_prefix(entry, skip_marker_at_level)
     table.insert(parts, char .. " ")
   end
 
+  return table.concat(parts)
+end
+
+-- Prefix for the git-status line under a repo directory: same ancestor
+-- columns as the dir, but the connector is │ (or a space if last child)
+-- so the branch line hangs under the name without a second ├/└.
+local function build_status_prefix(entry, skip_marker_at_level)
+  local level = entry.depth
+  if level == 0 then
+    return "   "
+  end
+  local parts = { "   " }
+  for i = 1, level do
+    local char
+    if i == level then
+      char = entry.is_last_child and " " or "│"
+    else
+      char = skip_marker_at_level[i] and " " or "│"
+    end
+    table.insert(parts, char .. " ")
+  end
   return table.concat(parts)
 end
 
@@ -319,6 +346,12 @@ local function git_status_enabled(config)
   if not (config.git and config.git.enable) then return false end
   local status = config.git.status
   return status == nil or status.enable ~= false
+end
+
+local function git_multiline(config)
+  if not git_status_enabled(config) then return false end
+  local m = config.git.multiline
+  return m == nil or m ~= false
 end
 
 -- Find the status code for a path inside its owning repo.
@@ -410,13 +443,9 @@ local function display_branch(st)
   return branch
 end
 
--- Build { text, hl } chunks (no separators) with a compact repo summary:
--- branch name, ahead/behind, and non-zero change count totals. Used next to
--- directories in the tree that are git workspaces.
-local function branch_chunks(st, symbols)
+-- Status-only chunks (ahead/behind and change counts) for a repo directory.
+local function repo_status_chunks(st, symbols)
   local chunks = {}
-
-  table.insert(chunks, { symbols.branch .. " " .. display_branch(st), "SuperTreeGitBranch" })
 
   if st.ahead > 0 then
     table.insert(chunks, { symbols.ahead .. st.ahead, "SuperTreeGitAheadBehind" })
@@ -440,6 +469,34 @@ local function branch_chunks(st, symbols)
   end
 
   return chunks
+end
+
+-- Compact repo summary including the branch name.
+local function branch_chunks(st, symbols)
+  local chunks = {
+    { symbols.branch .. " " .. display_branch(st), "SuperTreeGitBranch" },
+  }
+  for _, ch in ipairs(repo_status_chunks(st, symbols)) do
+    table.insert(chunks, ch)
+  end
+  return chunks
+end
+
+local function virt_text_width(chunks)
+  local w = 0
+  for _, ch in ipairs(chunks) do
+    w = w + vim.fn.strdisplaywidth(ch[1])
+  end
+  return w
+end
+
+local function width_for_buf(buf)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == buf then
+      return vim.api.nvim_win_get_width(win)
+    end
+  end
+  return vim.o.columns
 end
 
 -- Left-hand chunks of the cwd root status line: branch identity.
@@ -525,6 +582,7 @@ function M.render(sidebar_buf, config)
   end
 
   vim.api.nvim_buf_clear_namespace(sidebar_buf, ns, 0, -1)
+  M.row_entry = {}
 
   -- Line 0: cwd root with open-folder icon and optional git badge,
   -- shifted right by one column of padding.
@@ -576,6 +634,7 @@ function M.render(sidebar_buf, config)
   -- with the first character of the path label above), line diffstat and
   -- change breakdowns as right-aligned virtual text.
   local status_enabled = git_status_enabled(config)
+  local multiline = git_multiline(config)
   local symbols = git_symbols(config)
   M.header_lines = 1
   if status_enabled then
@@ -636,6 +695,7 @@ function M.render(sidebar_buf, config)
 
     local line = prefix .. icon_with_space .. entry.name .. git_badge
     table.insert(lines, line)
+    M.row_entry[#lines] = entry
 
     local lnum            = #lines - 1  -- 0-indexed buffer line number
     local icon_byte_start = #prefix
@@ -659,14 +719,35 @@ function M.render(sidebar_buf, config)
       end
     end
 
-    -- Git status and diagnostics: right-aligned virtual text so buffer
-    -- text (and the row -> entry mapping) is unaffected.
+    -- Git status and diagnostics. Repo directories use a second line
+    -- (same layout as the cwd root) when git.multiline is on; otherwise
+    -- a compact right-aligned summary, dropping the branch name if it
+    -- would overlap the path.
+    local repo_st = status_enabled and entry.is_dir and git.repo_status[entry.path] or nil
+    local use_multiline = multiline and repo_st
+
     local vt_chunks = {}
-    if status_enabled then
-      local repo_st = entry.is_dir and git.repo_status[entry.path] or nil
+    if status_enabled and not use_multiline then
       if repo_st then
-        for _, ch in ipairs(to_virt_text(branch_chunks(repo_st, symbols))) do
-          table.insert(vt_chunks, ch)
+        local with_branch = to_virt_text(branch_chunks(repo_st, symbols))
+        local status_only = to_virt_text(repo_status_chunks(repo_st, symbols))
+        local line_w = vim.fn.strdisplaywidth(line)
+        local diag_w = 0
+        if config.diagnostics and config.diagnostics.enable ~= false then
+          local dchunk = diagnostics.chunk(entry.path, entry.is_dir, config)
+          if dchunk then
+            diag_w = vim.fn.strdisplaywidth(" " .. dchunk[1])
+          end
+        end
+        local win_w = width_for_buf(sidebar_buf)
+        if line_w + 1 + virt_text_width(with_branch) + diag_w <= win_w then
+          for _, ch in ipairs(with_branch) do
+            table.insert(vt_chunks, ch)
+          end
+        else
+          for _, ch in ipairs(status_only) do
+            table.insert(vt_chunks, ch)
+          end
         end
       else
         local code = lookup_status(entry.path, entry.is_dir)
@@ -683,7 +764,7 @@ function M.render(sidebar_buf, config)
         end
       end
     end
-    if config.diagnostics and config.diagnostics.enable ~= false then
+    if not use_multiline and config.diagnostics and config.diagnostics.enable ~= false then
       local dchunk = diagnostics.chunk(entry.path, entry.is_dir, config)
       if dchunk then
         table.insert(vt_chunks, { " " .. dchunk[1], dchunk[2] })
@@ -691,6 +772,36 @@ function M.render(sidebar_buf, config)
     end
     if #vt_chunks > 0 then
       table.insert(virt_marks, { line = lnum, chunks = vt_chunks })
+    end
+
+    if use_multiline then
+      local st_prefix = build_status_prefix(entry, skip_marker_at_level)
+      local pad = string.rep(" ", vim.fn.strdisplaywidth(icon_with_space))
+      local status_line = st_prefix .. pad
+      local st_lnum = #lines  -- 0-indexed after the upcoming insert
+      local first = true
+      for _, ch in ipairs(root_left_chunks(repo_st, symbols)) do
+        if not first then status_line = status_line .. " " end
+        first = false
+        local seg_start = #status_line
+        status_line = status_line .. ch[1]
+        table.insert(git_hl, { line = st_lnum, start = seg_start, end_ = #status_line, hl = ch[2] })
+      end
+      table.insert(lines, status_line)
+      M.row_entry[#lines] = entry
+      if #st_prefix > 0 then
+        table.insert(indent_hl, { line = st_lnum, start = 0, end_ = #st_prefix })
+      end
+      local right = root_right_chunks(repo_st, symbols)
+      if config.diagnostics and config.diagnostics.enable ~= false then
+        local dchunk = diagnostics.chunk(entry.path, true, config)
+        if dchunk then
+          table.insert(right, dchunk)
+        end
+      end
+      if #right > 0 then
+        table.insert(virt_marks, { line = st_lnum, chunks = to_virt_text(right) })
+      end
     end
   end
 

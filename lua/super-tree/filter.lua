@@ -186,14 +186,14 @@ local function apply_search(term)
   -- Fuzzy finder: land on the first file (or first entry).
   if opts.fuzzy_finder and window.is_open() then
     local row = nil
-    for i, entry in ipairs(tree.tree_data) do
+    for _, entry in ipairs(tree.tree_data) do
       if not entry.is_dir then
-        row = i + tree.header_lines
+        row = tree.row_for_path(entry.path)
         break
       end
     end
     if not row and tree.tree_data[1] then
-      row = 1 + tree.header_lines
+      row = tree.row_for_path(tree.tree_data[1].path)
     end
     if row then
       pcall(vim.api.nvim_win_set_cursor, window.sidebar_win, { row, 0 })
