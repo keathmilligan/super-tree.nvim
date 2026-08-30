@@ -77,7 +77,7 @@ local BUILTIN_ICONS = {
     ["lock"]   = { icon = "󰌠 ", hl = "DevIconLock" },
     ["log"]    = { icon = "󰌠 ", hl = "DevIconLog" },
   },
-  default = { icon = " ", hl = "TreeSidebarFile" },
+  default = { icon = " ", hl = "SuperTreeFile" },
 }
 
 -- Extract file extension from filename (returns lowercase extension or empty string)
@@ -107,7 +107,7 @@ end
 -- `icons_config` is the `config.icons` table from setup.
 function M.get_icon_for_file(name, extension, icons_config)
   if icons_config and icons_config.enable == false then
-    return M.ICON_FILE, "TreeSidebarFile"
+    return M.ICON_FILE, "SuperTreeFile"
   end
 
   if icons_config and icons_config.provider == "builtin" then
@@ -173,7 +173,7 @@ function M.setup_highlights()
     DevIconCargo      = "Constant",
     DevIconLock       = "Comment",
     DevIconLog        = "Comment",
-    TreeSidebarFile   = "Normal",
+    SuperTreeFile   = "Normal",
   }
 
   for name, link in pairs(links) do

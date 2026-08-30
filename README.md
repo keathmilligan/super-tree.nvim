@@ -1,169 +1,192 @@
-# nvim-tree-sidebar
-
-A Neovim file explorer sidebar that displays a file tree view of the current directory. This plugin is evolving incrementally toward a full-featured sidebar.
+# super-tree.nvim
+A Neovim file explorer with neo-tree-style navigation, git status, and file operations.
 
 ## Features
 
-- **File Tree View**: Displays hierarchical file structure with guide lines connecting parent-child relationships
-- **File-Type Icons**: Icons for 30+ file types (Lua, JavaScript, Python, Rust, etc.) with theme-aware colors
-- **Special File Icons**: Distinct icons for Dockerfile, .gitignore, Makefile, package.json, README.md, and more
-- **Optional nvim-web-devicons**: Full 500+ icon support when `nvim-web-devicons` is installed
-- **Folder Icons**: Open/closed folder icons reflecting directory state
-- **Directory Highlighting**: Directory names highlighted with theme-aware colors
-- **Navigation**: Up/Down arrow keys to navigate through the tree
-- **Directory Expansion**: Enter key to expand/collapse directories
-- **Non-Buffer UI**: Sidebar behaves like a pure UI element - no insert mode, no editing commands
-- **Auto-Scroll**: Content scrolls automatically when navigating beyond visible area
-- **Display Modes**: Floating (overlay) or pinned (pushes content) sidebar options
+- Hierarchical file tree with guide lines, folder icons, and file-type icons (builtin or [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons)); click to select, double-click to open
+- Open files in the current window, splits, or tabs; create, rename, delete, move, copy, and clipboard cut/paste
+- Dotfiles and gitignored entries hidden by default (`H` to toggle); live filter (`/`), directory finder (`D`), fuzzy sorter (`#`), filter-on-submit (`f`)
+- Follows the current file; `.` / `<BS>` change the tree root
+- Three display modes: floating popup, pinned split, or persistent sidebar
+- Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, upstream, ahead/behind, stash, lines added/removed)
+- Optional buffers pane above the tree (independently scrollable and resizable; `B` to toggle)
+- LSP diagnostic icons on files and directories (bubbled to parents)
+- Background git refresh via filesystem watchers; darker sidebar background derived from the colorscheme
 
 ## Roadmap
 
-This plugin is evolving incrementally. Planned features include:
-- File operations (create, delete, rename, copy, move)
-- File opening in splits and tabs
-- Git status indicators
-- Filtered view (hide dotfiles, gitignore patterns)
-- Search within tree
+- Git-status view
+- Window picker
 
 ## Requirements
 
 - Neovim 0.8+
-- **Nerd Font** (required for icons)
-
-### Optional Dependencies
-
-- [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons) - Provides 500+ file-type icons with colors (recommended)
+- Nerd Font
+- `git` in `$PATH` (for git status)
 
 ## Installation
 
-### LazyVim
-
-Add to your LazyVim config:
+### lazy.nvim
 
 ```lua
-return {
-  "yourusername/nvim-tree-sidebar",
-  opts = {},
-}
+return { "keathmilligan/super-tree.nvim", opts = {} }
 ```
 
-### Packer
+### packer.nvim
 
 ```lua
-use {
-  "yourusername/nvim-tree-sidebar",
-  config = function()
-    require("nvim-tree-sidebar").setup()
-  end,
-}
+use { "keathmilligan/super-tree.nvim", config = function()
+  require("super-tree").setup()
+end }
 ```
 
 ### vim-plug
 
 ```vim
-Plug 'yourusername/nvim-tree-sidebar'
-" Then in your init.lua:
-" require("nvim-tree-sidebar").setup()
+Plug 'keathmilligan/super-tree.nvim'
 ```
+
+Then `require("super-tree").setup()`.
 
 ## Commands
 
 | Command | Description |
 |---------|-------------|
-| `:TreeSidebar` | Toggle sidebar visibility |
-| `:TreeSidebarOpen` | Open sidebar |
-| `:TreeSidebarClose` | Close sidebar |
+| `:SuperTree` | Toggle |
+| `:SuperTreeOpen` | Open |
+| `:SuperTreeClose` | Close |
+| `:SuperTreeFocus` | Focus (opens if closed) |
+| `:SuperTreeReveal` | Reveal the current file |
 
 ## Keybindings
 
-The sidebar only responds to these keys when focused:
+Neo-tree filesystem defaults where practical. Editing keys are disabled.
 
 | Key | Action |
 |-----|--------|
-| `<Up>` | Move selection up |
-| `<Down>` | Move selection down |
-| `<Enter>` | Expand/collapse directory |
-
-All other keys are disabled to prevent buffer-related behaviors.
+| `j` / `k` / arrows | Move |
+| `<Enter>` / double-click | Toggle directory / open file |
+| `l` / `<Right>` | Expand / open |
+| `h` / `<Left>` | Collapse / jump to parent |
+| `S` / `s` / `t` | Open in split / vsplit / tab |
+| `<Tab>` | Jump to editor |
+| `<C-w>` … | Window commands |
+| `.` / `<BS>` | Set root / root up |
+| `z` | Collapse all |
+| `a` / `A` | Add file / directory |
+| `d` / `r` / `m` / `c` | Delete / rename / move / copy |
+| `y` / `x` / `p` | Clipboard copy / cut / paste |
+| `H` | Toggle hidden |
+| `/` | Live filter (Enter opens, Esc clears) |
+| `D` | Filter directories |
+| `#` | Fuzzy sorter |
+| `f` | Filter on submit |
+| `<C-x>` | Clear filter |
+| `B` | Toggle buffers pane |
+| `R` | Refresh |
+| `?` | Help |
+| `q` | Close |
+| `<Esc>` | Close (floating and pinned only) |
 
 ## Configuration
 
 ```lua
-require("nvim-tree-sidebar").setup({
-  width = 30,        -- Sidebar width in columns
-  mode = "floating", -- "floating" or "pinned"
+require("super-tree").setup({
+  width = 50,
+  mode = "floating", -- "floating", "pinned", or "sidebar"
   icons = {
-    enable = true,       -- Enable file-type icons
-    provider = "auto",   -- "auto", "nvim-web-devicons", or "builtin"
+    enable = true,
+    provider = "auto", -- "auto", "nvim-web-devicons", or "builtin"
+  },
+  follow_current_file = true,
+  open_files_do_not_replace_types = { "terminal", "Trouble", "qf", "edgy" },
+  filtered_items = {
+    hide_dotfiles = true,
+    hide_gitignored = true,
+  },
+  filter = {
+    search_limit = 50,
+    find_by_full_path_words = false,
+  },
+  buffers = {
+    enable = false,
+    height = 8,
+  },
+  diagnostics = {
+    enable = true,
+    symbols = { error = "", warn = "", info = "", hint = "" },
+  },
+  git = {
+    enable = true,
+    status = {
+      enable = true,
+      symbols = {
+        added = "✚", deleted = "✖", modified = "", renamed = "󰁕",
+        untracked = "", ignored = "", staged = "", unstaged = "󰄱",
+        conflict = "", branch = "", ahead = "↑", behind = "↓",
+        clean = "✔", stash = "≡", lines_added = "+", lines_removed = "-",
+      },
+    },
   },
 })
 ```
 
-### Icon Configuration
+### Buffers
 
-| Option | Type | Default | Description |
-|--------|------|---------|-------------|
-| `icons.enable` | boolean | `true` | Enable file-type specific icons |
-| `icons.provider` | string | `"auto"` | Icon provider: `"auto"` (nvim-web-devicons if available, fallback to builtin), `"nvim-web-devicons"` (require it), `"builtin"` (always use built-in icons) |
+Disabled by default. Set `buffers.enable = true` or press `B`. The pane is a real window above the tree (`<C-w>k` / `<C-w>j` to move, resize with `<C-w>+/-` or the mouse). `<Enter>` opens, `d` deletes the buffer.
 
-### Icon Providers
+### Diagnostics
 
-**auto** (default):
-- Uses `nvim-web-devicons` if installed
-- Falls back to built-in icons (30+ common file types) if not available
+Right-aligned icons (error/warn/info/hint) on files with LSP diagnostics; directories show the highest-severity child. Disable with `diagnostics.enable = false`.
 
-**nvim-web-devicons**:
-- Requires `nvim-tree/nvim-web-devicons` to be installed
-- Provides 500+ file-type icons with colors
-- Shows warning if not found
+### Filter
 
-**builtin**:
-- Always uses built-in icon set
-- Includes 30+ common file types
-- Works without any dependencies
+`/` live-filters the tree (substring match on names, 50 hits). ↑/↓ move the tree while typing; Enter opens the focused node and clears; Esc clears. `D` is directories only. `#` ranks hits with a fzy-like scorer. `f` waits for Enter and keeps the filter (`<C-x>` clears). `find_by_full_path_words` matches against the relative path instead of the filename.
 
-### Display Modes
+### Modes
 
-**Floating** (default):
-- Sidebar overlays on top of the current buffer
-- No statusline - completely minimal UI
-- Press `q` or `<Esc>` to close
+- **floating** (default): overlay; `q` / `<Esc>` close
+- **pinned**: split; `q` / `<Esc>` close
+- **sidebar**: persistent split; stays open when files are opened; only `q` closes; quitting the last editor window closes it too
 
-**Pinned**:
-- Sidebar pushes all window content to the right
-- Acts like a split without buffer behaviors
-- Has a minimal statusline showing "Tree Sidebar"
-- Fixed width that won't resize with `<C-w>=`
+### Git status
 
-### Bufferline Integration
+Right-aligned virtual text in muted colors:
 
-To add an offset in bufferline when the sidebar is open:
+- **Files**: porcelain symbol; name tinted to match
+- **Directories**: highest-priority child status (conflict > untracked > modified > added > deleted > renamed)
+- **Repos**: branch plus ahead/behind and change counts
+- **Root** (when cwd is a repo): left — branch, upstream, ahead/behind, stash; right — lines added/removed and staged/unstaged breakdowns
+
+Refreshed in the background from directory watchers, git-dir watchers, and `BufWritePost`.
+
+### Appearance
+
+Sidebar background is darkened from `Normal` and re-derived on `:colorscheme`. Override `SuperTreeNormal` (also `SuperTreeNormalNC`, `SuperTreeEndOfBuffer`, `SuperTreeCursorLine`, `SuperTreeWinSeparator`).
+
+Git highlight groups: `SuperTreeGitAdded`, `SuperTreeGitDeleted`, `SuperTreeGitModified`, `SuperTreeGitRenamed`, `SuperTreeGitStaged`, `SuperTreeGitUnstaged`, `SuperTreeGitUntracked`, `SuperTreeGitIgnored`, `SuperTreeGitConflict`, `SuperTreeGitBranch`, `SuperTreeGitAheadBehind`, `SuperTreeGitClean`.
+
+### Icons
+
+`icons.provider`: `"auto"` (nvim-web-devicons if present, else builtin), `"nvim-web-devicons"`, or `"builtin"` (30+ types, no dependencies).
+
+### Bufferline
 
 ```lua
 require("bufferline").setup({
   options = {
     offsets = {
-      {
-        filetype = "tree-sidebar",
-        text = "Tree Sidebar",
-        highlight = "Directory",
-        separator = true,
-      }
-    }
-  }
+      { filetype = "SuperTree", text = "SuperTree", highlight = "Directory", separator = true },
+    },
+  },
 })
 ```
 
-The plugin automatically triggers `redrawtabline` and emits `User` events (`TreeSidebarOpen`, `TreeSidebarClose`) for bufferline integration.
+The plugin fires `User SuperTreeOpen` / `SuperTreeClose` and redraws the tabline.
 
 ## Limitations
 
-This plugin is focused on tree navigation and visualization:
-
-- No file operations (create, delete, rename)
-- No file opening
-- No mouse support
-- No persistent state
+No persistent state across sessions. Mouse clicks require `mouse` to include normal mode (e.g. `set mouse=a`).
 
 ## License
 
