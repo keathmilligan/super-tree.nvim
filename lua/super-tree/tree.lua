@@ -306,8 +306,8 @@ end
 -- Fallback symbols when config.git.status.symbols is absent (mirrors the
 -- defaults in init.lua).
 local DEFAULT_GIT_SYMBOLS = {
-  added     = "✚",
-  deleted   = "✖",
+  added     = "",
+  deleted   = "",
   modified  = "",
   renamed   = "󰁕",
   untracked = "",
@@ -316,8 +316,8 @@ local DEFAULT_GIT_SYMBOLS = {
   unstaged  = "󰄱",
   conflict  = "",
   branch    = "",
-  ahead     = "↑",
-  behind    = "↓",
+  ahead     = "",
+  behind    = "",
   clean     = "",
   stash     = "≡",
   lines_added   = "+",
@@ -420,7 +420,7 @@ local function status_chunks(code, symbols)
   return chunks, name_hl
 end
 
--- Per-change-type breakdown text, e.g. "✚1 2 ✖1 󰁕1".
+-- Per-change-type breakdown text, e.g. "1 2 1 󰁕1".
 local function change_detail_text(d, symbols)
   local parts = {}
   if d.added    > 0 then table.insert(parts, symbols.added    .. d.added)    end

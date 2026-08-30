@@ -58,8 +58,8 @@ local config = {
       enable = true,  -- git status symbols, branch names, repo summaries
       symbols = {
         -- Change type
-        added     = "✚",
-        deleted   = "✖",
+        added     = "",
+        deleted   = "",
         modified  = "",
         renamed   = "󰁕",
         -- Status type
@@ -70,8 +70,8 @@ local config = {
         conflict  = "",
         -- Repo summary
         branch    = "",
-        ahead     = "↑",
-        behind    = "↓",
+        ahead     = "",
+        behind    = "",
         clean     = "",
         stash     = "≡",
         lines_added   = "+",

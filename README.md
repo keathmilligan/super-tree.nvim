@@ -138,9 +138,9 @@ require("super-tree").setup({
     status = {
       enable = true,
       symbols = {
-        added = "✚", deleted = "✖", modified = "", renamed = "󰁕",
+        added = "", deleted = "", modified = "", renamed = "󰁕",
         untracked = "", ignored = "", staged = "", unstaged = "󰄱",
-        conflict = "", branch = "", ahead = "↑", behind = "↓",
+        conflict = "", branch = "", ahead = "", behind = "",
         clean = "", stash = "≡", lines_added = "+", lines_removed = "-",
       },
     },
@@ -158,7 +158,7 @@ Right-aligned icons (error/warn/info/hint) on files with LSP diagnostics; direct
 
 ### Filter
 
-`/` live-filters the tree (substring match on names, 50 hits). ↑/↓ move the tree while typing; Enter opens the focused node and clears; Esc clears. `D` is directories only. `#` ranks hits with a fzy-like scorer. `f` waits for Enter and keeps the filter (`<C-x>` clears). `find_by_full_path_words` matches against the relative path instead of the filename.
+`/` live-filters the tree (substring match on names, 50 hits). / move the tree while typing; Enter opens the focused node and clears; Esc clears. `D` is directories only. `#` ranks hits with a fzy-like scorer. `f` waits for Enter and keeps the filter (`<C-x>` clears). `find_by_full_path_words` matches against the relative path instead of the filename.
 
 ### Modes
 
