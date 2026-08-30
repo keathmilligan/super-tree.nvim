@@ -318,7 +318,7 @@ local DEFAULT_GIT_SYMBOLS = {
   branch    = "",
   ahead     = "↑",
   behind    = "↓",
-  clean     = "✔",
+  clean     = "",
   stash     = "≡",
   lines_added   = "+",
   lines_removed = "-",
@@ -551,11 +551,13 @@ local function root_right_chunks(st, symbols)
     table.insert(chunks, { symbols.untracked .. c.untracked, "SuperTreeGitUntracked" })
   end
 
-  if c.conflict + c.staged + c.unstaged + c.untracked == 0 then
-    table.insert(chunks, { symbols.clean, "SuperTreeGitClean" })
-  end
-
   return chunks
+end
+
+local function repo_is_clean(st)
+  if not st or not st.counts then return false end
+  local c = st.counts
+  return c.conflict + c.staged + c.unstaged + c.untracked == 0
 end
 
 -- Turn separator-less chunks into virt_text chunks with a leading space
@@ -584,6 +586,10 @@ function M.render(sidebar_buf, config)
   vim.api.nvim_buf_clear_namespace(sidebar_buf, ns, 0, -1)
   M.row_entry = {}
 
+  local status_enabled = git_status_enabled(config)
+  local multiline = git_multiline(config)
+  local symbols = git_symbols(config)
+
   -- Line 0: cwd root with open-folder icon and optional git badge,
   -- shifted right by one column of padding.
   local root_icon = " " .. icons.ICON_FOLDER_OPEN
@@ -600,11 +606,15 @@ function M.render(sidebar_buf, config)
       root_git_hl_group = "SuperTreeGitRepo"
     end
   end
+  local root_clean = ""
+  if status_enabled and repo_is_clean(git.repo_status[cwd]) then
+    root_clean = " " .. symbols.clean
+  end
   local filter_label = ""
   if M.search_pattern and M.search_pattern ~= "" then
     filter_label = '  Find "' .. M.search_pattern .. '"'
   end
-  local root_line = root_icon .. M.cwd_name .. root_git_badge .. filter_label
+  local root_line = root_icon .. M.cwd_name .. root_git_badge .. root_clean .. filter_label
   local lines = { root_line }
 
   -- Accumulate highlight positions during the loop.
@@ -620,8 +630,12 @@ function M.render(sidebar_buf, config)
     local badge_start = #root_icon + #M.cwd_name
     table.insert(git_hl, { line = 0, start = badge_start, end_ = badge_start + #root_git_badge, hl = root_git_hl_group })
   end
+  if #root_clean > 0 then
+    local clean_start = #root_icon + #M.cwd_name + #root_git_badge
+    table.insert(git_hl, { line = 0, start = clean_start, end_ = clean_start + #root_clean, hl = "SuperTreeGitClean" })
+  end
   if #filter_label > 0 then
-    local filter_start = #root_icon + #M.cwd_name + #root_git_badge
+    local filter_start = #root_icon + #M.cwd_name + #root_git_badge + #root_clean
     table.insert(git_hl, {
       line = 0, start = filter_start, end_ = filter_start + #filter_label,
       hl = "SuperTreeFilterTerm",
@@ -633,9 +647,6 @@ function M.render(sidebar_buf, config)
   -- upstream, ahead/behind, and stash as literal text on the left (aligned
   -- with the first character of the path label above), line diffstat and
   -- change breakdowns as right-aligned virtual text.
-  local status_enabled = git_status_enabled(config)
-  local multiline = git_multiline(config)
-  local symbols = git_symbols(config)
   M.header_lines = 1
   if status_enabled then
     local root_status = git.repo_status[cwd]
@@ -693,7 +704,12 @@ function M.render(sidebar_buf, config)
       end
     end
 
-    local line = prefix .. icon_with_space .. entry.name .. git_badge
+    local clean_badge = ""
+    if status_enabled and entry.is_dir and repo_is_clean(git.repo_status[entry.path]) then
+      clean_badge = " " .. symbols.clean
+    end
+
+    local line = prefix .. icon_with_space .. entry.name .. git_badge .. clean_badge
     table.insert(lines, line)
     M.row_entry[#lines] = entry
 
@@ -716,6 +732,10 @@ function M.render(sidebar_buf, config)
       if git_badge_hl and #git_badge > 0 then
         local badge_start = name_byte_start + #entry.name
         table.insert(git_hl, { line = lnum, start = badge_start, end_ = badge_start + #git_badge, hl = git_badge_hl })
+      end
+      if #clean_badge > 0 then
+        local clean_start = name_byte_start + #entry.name + #git_badge
+        table.insert(git_hl, { line = lnum, start = clean_start, end_ = clean_start + #clean_badge, hl = "SuperTreeGitClean" })
       end
     end
 

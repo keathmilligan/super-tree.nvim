@@ -141,7 +141,7 @@ require("super-tree").setup({
         added = "✚", deleted = "✖", modified = "", renamed = "󰁕",
         untracked = "", ignored = "", staged = "", unstaged = "󰄱",
         conflict = "", branch = "", ahead = "↑", behind = "↓",
-        clean = "✔", stash = "≡", lines_added = "+", lines_removed = "-",
+        clean = "", stash = "≡", lines_added = "+", lines_removed = "-",
       },
     },
   },
