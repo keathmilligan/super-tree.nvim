@@ -14,7 +14,7 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 - Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, upstream, ahead/behind, stash, lines added/removed)
 - Buffers pane above the tree (independently scrollable and resizable; `B` to toggle)
 - LSP diagnostic icons on files and directories (bubbled to parents)
-- Background git refresh via filesystem watchers; darker sidebar background derived from the colorscheme
+- Background git refresh via filesystem watchers
 
 ## Requirements
 
@@ -109,7 +109,7 @@ Neo-tree filesystem defaults where practical. Editing keys are disabled.
 ```lua
 require("super-tree").setup({
   width = 50,
-  mode = "floating", -- "floating", "pinned", or "sidebar"
+  mode = "sidebar", -- "floating", "pinned", or "sidebar"
   icons = {
     enable = true,
     provider = "auto", -- "auto", "nvim-web-devicons", or "builtin"
@@ -161,9 +161,9 @@ Right-aligned icons (error/warn/info/hint) on files with LSP diagnostics; direct
 
 ### Modes
 
-- **floating** (default): overlay; `q` / `<Esc>` close
+- **sidebar** (default): persistent split; stays open when files are opened; only `q` closes; quitting the last editor window closes it too
+- **floating**: overlay; `q` / `<Esc>` close
 - **pinned**: split; `q` / `<Esc>` close
-- **sidebar**: persistent split; stays open when files are opened; only `q` closes; quitting the last editor window closes it too
 
 ### Git status
 

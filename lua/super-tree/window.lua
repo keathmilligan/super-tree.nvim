@@ -26,20 +26,35 @@ end
 -- Buffer
 -- ---------------------------------------------------------------------------
 
+-- Scratch options so :qa never prompts to save SuperTree:// buffers.
+-- nvim_buf_set_lines marks a named buffer modified; callers must also
+-- set `modified = false` after rewriting contents.
+local function configure_scratch(buf, name)
+  vim.api.nvim_buf_set_name(buf, name)
+  vim.bo[buf].buftype   = "nofile"
+  vim.bo[buf].bufhidden = "hide"
+  vim.bo[buf].buflisted = false
+  vim.bo[buf].swapfile  = false
+  vim.bo[buf].undofile  = false
+  vim.bo[buf].modified  = false
+  vim.bo[buf].filetype  = "SuperTree"
+  vim.api.nvim_create_autocmd("BufWriteCmd", {
+    buffer = buf,
+    callback = function()
+      vim.bo[buf].modified = false
+    end,
+  })
+end
+
 function M.create_or_get_buffer()
   if M.sidebar_buf and vim.api.nvim_buf_is_valid(M.sidebar_buf) then
     return M.sidebar_buf
   end
 
   M.sidebar_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_name(M.sidebar_buf, "SuperTree://sidebar")
-  vim.bo[M.sidebar_buf].buftype   = "nofile"
   -- "hide", not "wipe": when a foreign buffer briefly enters the sidebar
   -- window, the sidebar buffer must survive so the guard can restore it.
-  vim.bo[M.sidebar_buf].bufhidden = "hide"
-  vim.bo[M.sidebar_buf].buflisted = false
-  vim.bo[M.sidebar_buf].swapfile  = false
-  vim.bo[M.sidebar_buf].filetype  = "SuperTree"
+  configure_scratch(M.sidebar_buf, "SuperTree://sidebar")
 
   vim.api.nvim_create_autocmd("BufWinEnter", {
     buffer = M.sidebar_buf,
@@ -185,12 +200,7 @@ function M.create_or_get_buffers_buffer()
     return M.buffers_buf
   end
   M.buffers_buf = vim.api.nvim_create_buf(false, true)
-  vim.api.nvim_buf_set_name(M.buffers_buf, "SuperTree://buffers")
-  vim.bo[M.buffers_buf].buftype   = "nofile"
-  vim.bo[M.buffers_buf].bufhidden = "hide"
-  vim.bo[M.buffers_buf].buflisted = false
-  vim.bo[M.buffers_buf].swapfile  = false
-  vim.bo[M.buffers_buf].filetype  = "SuperTree"
+  configure_scratch(M.buffers_buf, "SuperTree://buffers")
   return M.buffers_buf
 end
 

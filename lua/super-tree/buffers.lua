@@ -168,6 +168,7 @@ function M.render(buf, config)
 
   vim.bo[buf].modifiable = false
   vim.bo[buf].readonly   = true
+  vim.bo[buf].modified   = false
 
   if window.buffers_win and vim.api.nvim_win_is_valid(window.buffers_win) then
     vim.wo[window.buffers_win].statusline = header

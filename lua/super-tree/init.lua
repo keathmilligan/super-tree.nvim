@@ -16,7 +16,7 @@ local config = {
   -- "sidebar":  persistent vertical split like neo-tree - stays open when
   --             files are opened, never covers other windows, navigable
   --             like a regular window; only q closes it
-  mode  = "floating",
+  mode  = "sidebar",
   icons = {
     enable   = true,
     provider = "auto",  -- "auto", "nvim-web-devicons", or "builtin"

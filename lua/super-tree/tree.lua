@@ -736,6 +736,7 @@ function M.render(sidebar_buf, config)
 
   vim.bo[sidebar_buf].modifiable = false
   vim.bo[sidebar_buf].readonly   = true
+  vim.bo[sidebar_buf].modified   = false
 end
 
 return M
