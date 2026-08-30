@@ -28,8 +28,8 @@ local config = {
   open_files_do_not_replace_types = { "terminal", "Trouble", "qf", "edgy" },
   -- Entries hidden by default; toggle visibility with H.
   filtered_items = {
-    hide_dotfiles   = true,
-    hide_gitignored = true,
+    hide_dotfiles   = false,
+    hide_gitignored = false,
   },
   -- Live filter / fuzzy finder (`/`, `D`, `#`, `f`).
   filter = {

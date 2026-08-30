@@ -46,8 +46,8 @@ end
 function M.should_hide(name, full_path, config)
   if M.show_hidden then return false end
   local f = config.filtered_items or {}
-  if f.hide_dotfiles ~= false and name:sub(1, 1) == "." then return true end
-  if f.hide_gitignored ~= false and is_gitignored(full_path) then return true end
+  if f.hide_dotfiles and name:sub(1, 1) == "." then return true end
+  if f.hide_gitignored and is_gitignored(full_path) then return true end
   return false
 end
 

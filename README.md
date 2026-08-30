@@ -8,7 +8,7 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 
 - Hierarchical file tree with guide lines, folder icons, and file-type icons (builtin or [nvim-web-devicons](https://github.com/nvim-tree/nvim-web-devicons)); click to select, double-click to open
 - Open files in the current window, splits, or tabs; create, rename, delete, move, copy, and clipboard cut/paste
-- Dotfiles and gitignored entries hidden by default (`H` to toggle); live filter (`/`), directory finder (`D`), fuzzy sorter (`#`), filter-on-submit (`f`)
+- Live filter (`/`), directory finder (`D`), fuzzy sorter (`#`), filter-on-submit (`f`); `H` toggles hiding of dotfiles and gitignored entries
 - Follows the current file; `.` / `<BS>` change the tree root
 - Three display modes: floating popup, pinned split, or persistent sidebar
 - Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, upstream, ahead/behind, stash, lines added/removed)
@@ -117,8 +117,8 @@ require("super-tree").setup({
   follow_current_file = true,
   open_files_do_not_replace_types = { "terminal", "Trouble", "qf", "edgy" },
   filtered_items = {
-    hide_dotfiles = true,
-    hide_gitignored = true,
+    hide_dotfiles = false,
+    hide_gitignored = false,
   },
   filter = {
     search_limit = 50,
