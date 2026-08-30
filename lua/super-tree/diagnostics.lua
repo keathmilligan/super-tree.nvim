@@ -10,12 +10,47 @@ M.enabled = true
 
 local SEV = vim.diagnostic.severity
 
-local DEFAULT_SYMBOLS = {
-  [SEV.ERROR] = "",
-  [SEV.WARN]  = "",
-  [SEV.INFO]  = "",
-  [SEV.HINT]  = "",
+-- Match the gutter: vim.diagnostic.config().signs.text, then sign_define,
+-- then Neovim's default E/W/I/H (single-cell, takes highlight fg).
+local FALLBACK_SYMBOLS = {
+  [SEV.ERROR] = "E",
+  [SEV.WARN]  = "W",
+  [SEV.INFO]  = "I",
+  [SEV.HINT]  = "H",
 }
+
+local SIGN_NAME = {
+  [SEV.ERROR] = "DiagnosticSignError",
+  [SEV.WARN]  = "DiagnosticSignWarn",
+  [SEV.INFO]  = "DiagnosticSignInfo",
+  [SEV.HINT]  = "DiagnosticSignHint",
+}
+
+local KEY = {
+  [SEV.ERROR] = "error",
+  [SEV.WARN]  = "warn",
+  [SEV.INFO]  = "info",
+  [SEV.HINT]  = "hint",
+}
+
+local function gutter_symbol(sev)
+  local cfg = vim.diagnostic.config()
+  local signs = cfg and cfg.signs
+  if type(signs) == "table" and type(signs.text) == "table" then
+    local t = signs.text[sev]
+    if type(t) == "string" and t ~= "" then
+      return t
+    end
+  end
+  local name = SIGN_NAME[sev]
+  if name then
+    local def = vim.fn.sign_getdefined(name)[1]
+    if def and type(def.text) == "string" and def.text:match("%S") then
+      return (def.text:gsub("%s+$", ""))
+    end
+  end
+  return FALLBACK_SYMBOLS[sev]
+end
 
 local DEFAULT_HL = {
   [SEV.ERROR] = "SuperTreeDiagnosticError",
@@ -67,9 +102,9 @@ end
 function M.chunk(path, is_dir, config)
   local sev = M.severity(path, is_dir)
   if not sev then return nil end
-  local symbols = (config.diagnostics and config.diagnostics.symbols) or {}
-  local key = ({ [SEV.ERROR] = "error", [SEV.WARN] = "warn", [SEV.INFO] = "info", [SEV.HINT] = "hint" })[sev]
-  local text = symbols[key] or DEFAULT_SYMBOLS[sev]
+  local key = KEY[sev]
+  local user = config.diagnostics and config.diagnostics.symbols
+  local text = (user and user[key]) or gutter_symbol(sev)
   if not text or text == "" then return nil end
   return { text, DEFAULT_HL[sev] }
 end

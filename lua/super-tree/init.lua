@@ -43,12 +43,8 @@ local config = {
   },
   diagnostics = {
     enable = true,
-    symbols = {
-      error = "",
-      warn  = "",
-      info  = "",
-      hint  = "",
-    },
+    -- nil: use gutter sign text (vim.diagnostic.config().signs), else E/W/I/H
+    -- symbols = { error = "E", warn = "W", info = "I", hint = "H" },
   },
   git = {
     enable = true,

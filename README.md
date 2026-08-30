@@ -130,7 +130,7 @@ require("super-tree").setup({
   },
   diagnostics = {
     enable = true,
-    symbols = { error = "", warn = "", info = "", hint = "" },
+    -- symbols = { error = "E", warn = "W", info = "I", hint = "H" },
   },
   git = {
     enable = true,
@@ -155,7 +155,7 @@ On by default (`buffers.enable = false` to disable). Press `B` to toggle. The pa
 
 ### Diagnostics
 
-Right-aligned icons (error/warn/info/hint) on files with LSP diagnostics; directories show the highest-severity child. Disable with `diagnostics.enable = false`.
+Right-aligned signs on files with LSP diagnostics (same text as the gutter: `vim.diagnostic.config().signs`, or `E`/`W`/`I`/`H`). Directories show the highest-severity child. Override with `diagnostics.symbols`. Disable with `diagnostics.enable = false`.
 
 ### Filter
 
