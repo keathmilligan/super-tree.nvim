@@ -56,6 +56,7 @@ local config = {
     multiline = true,
     status = {
       enable = true,  -- git status symbols, branch names, repo summaries
+      show_remote = false,  -- show upstream ref next to the branch name
       symbols = {
         -- Change type
         added     = "",

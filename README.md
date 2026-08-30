@@ -11,7 +11,7 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 - Live filter (`/`), directory finder (`D`), fuzzy sorter (`#`), filter-on-submit (`f`); `H` toggles hiding of dotfiles and gitignored entries
 - Follows the current file; `.` / `<BS>` change the tree root
 - Three display modes: floating popup, pinned split, or persistent sidebar
-- Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, upstream, ahead/behind, stash, lines added/removed)
+- Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, ahead/behind, stash, lines added/removed)
 - Buffers pane above the tree (independently scrollable and resizable; `B` to toggle)
 - LSP diagnostic icons on files and directories (bubbled to parents)
 - Background git refresh via filesystem watchers
@@ -137,6 +137,7 @@ require("super-tree").setup({
     multiline = true, -- two-line layout for git workspaces in the tree
     status = {
       enable = true,
+      show_remote = false, -- upstream ref next to the branch name
       symbols = {
         added = "", deleted = "", modified = "", renamed = "󰁕",
         untracked = "", ignored = "", staged = "", unstaged = "󰄱",
@@ -172,7 +173,7 @@ Right-aligned virtual text in muted colors:
 
 - **Files**: porcelain symbol; name tinted to match
 - **Directories**: highest-priority child status (conflict > untracked > modified > added > deleted > renamed)
-- **Repos** (`git.multiline = true`, default): two lines like the cwd root — name on the first, branch/upstream/ahead/behind/stash on the left of the second, line diffstat and change breakdowns on the right. Set `multiline = false` for a single-line compact summary.
+- **Repos** (`git.multiline = true`, default): two lines like the cwd root — name on the first, branch/ahead/behind/stash on the left of the second, line diffstat and change breakdowns on the right. Set `multiline = false` for a single-line compact summary. Set `git.status.show_remote = true` to include the upstream ref next to the branch.
 
 Refreshed in the background from directory watchers, git-dir watchers, and `BufWritePost`.
 

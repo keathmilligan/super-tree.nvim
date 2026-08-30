@@ -501,10 +501,10 @@ end
 
 -- Left-hand chunks of the cwd root status line: branch identity.
 -- Rendered as literal text aligned with the root path label.
-local function root_left_chunks(st, symbols)
+local function root_left_chunks(st, symbols, show_remote)
   local chunks = {}
   table.insert(chunks, { symbols.branch .. " " .. display_branch(st), "SuperTreeGitBranch" })
-  if st.upstream then
+  if show_remote and st.upstream then
     table.insert(chunks, { "…" .. st.upstream, "SuperTreeGitIgnored" })
   end
   if st.ahead > 0 then
@@ -653,7 +653,7 @@ function M.render(sidebar_buf, config)
     if root_status then
       local status_line = string.rep(" ", vim.fn.strdisplaywidth(root_icon))
       local first = true
-      for _, ch in ipairs(root_left_chunks(root_status, symbols)) do
+      for _, ch in ipairs(root_left_chunks(root_status, symbols, config.git.status and config.git.status.show_remote)) do
         if not first then status_line = status_line .. " " end
         first = false
         local seg_start = #status_line
@@ -800,7 +800,7 @@ function M.render(sidebar_buf, config)
       local status_line = st_prefix .. pad
       local st_lnum = #lines  -- 0-indexed after the upcoming insert
       local first = true
-      for _, ch in ipairs(root_left_chunks(repo_st, symbols)) do
+      for _, ch in ipairs(root_left_chunks(repo_st, symbols, config.git.status and config.git.status.show_remote)) do
         if not first then status_line = status_line .. " " end
         first = false
         local seg_start = #status_line
