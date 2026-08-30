@@ -38,7 +38,7 @@ local config = {
   },
   -- Open-buffers pane above the file tree (`B` to toggle).
   buffers = {
-    enable = false,
+    enable = true,
     height = 8,
   },
   diagnostics = {

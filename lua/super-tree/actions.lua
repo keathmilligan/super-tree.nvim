@@ -2,16 +2,17 @@
 -- These mirror neo-tree's filesystem commands: add, add_directory, delete,
 -- rename, move, copy, and clipboard-style copy/cut/paste.
 
+
 local git    = require("super-tree.git")
 local tree   = require("super-tree.tree")
 local window = require("super-tree.window")
 
-local M = {}
+local M      = {}
 
-local uv = vim.loop
+local uv     = vim.loop
 
 -- { path = string, op = "copy" | "cut" } or nil
-M.clipboard = nil
+M.clipboard  = nil
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -298,8 +299,8 @@ end
 
 local HELP_ENTRIES = {
   { "j / k / arrows", "move up / down" },
-  { "<CR>",               "toggle directory / open file" },
-  { "<2-LeftMouse>",      "toggle directory / open file" },
+  { "<CR>",           "toggle directory / open file" },
+  { "<2-LeftMouse>",  "toggle directory / open file" },
   { "l / <Right>",    "expand directory / open file" },
   { "h / <Left>",     "collapse directory / go to parent" },
   { "S",              "open in horizontal split" },
@@ -319,14 +320,14 @@ local HELP_ENTRIES = {
   { "y",              "copy node to clipboard" },
   { "x",              "cut node to clipboard" },
   { "p",              "paste clipboard node here" },
-  { "H",                  "toggle hidden (dotfiles, gitignored)" },
-  { "/",                  "live filter (fuzzy finder)" },
-  { "D",                  "filter directories" },
-  { "#",                  "fuzzy sorter" },
-  { "f",                  "filter on submit" },
-  { "<C-x>",              "clear filter" },
-  { "B",                  "toggle buffers pane" },
-  { "R",                  "refresh tree and git status" },
+  { "H",              "toggle hidden (dotfiles, gitignored)" },
+  { "/",              "live filter (fuzzy finder)" },
+  { "D",              "filter directories" },
+  { "#",              "fuzzy sorter" },
+  { "f",              "filter on submit" },
+  { "<C-x>",          "clear filter" },
+  { "B",              "toggle buffers pane" },
+  { "R",              "refresh tree and git status" },
   { "?",              "this help" },
   { "q / <Esc>",      "close (<Esc> not in sidebar mode)" },
 }
@@ -350,7 +351,7 @@ function M.show_help()
   vim.bo[buf].modifiable = false
   vim.bo[buf].bufhidden  = "wipe"
 
-  local win = vim.api.nvim_open_win(buf, true, {
+  local win              = vim.api.nvim_open_win(buf, true, {
     relative = "editor",
     width    = width,
     height   = height,
@@ -368,9 +369,9 @@ function M.show_help()
     end
   end
   local opts = { buffer = buf, nowait = true, silent = true }
-  vim.keymap.set("n", "q",     close_help, opts)
+  vim.keymap.set("n", "q", close_help, opts)
   vim.keymap.set("n", "<Esc>", close_help, opts)
-  vim.keymap.set("n", "?",     close_help, opts)
+  vim.keymap.set("n", "?", close_help, opts)
 end
 
 return M

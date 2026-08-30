@@ -62,9 +62,45 @@ function M.render(buf, config)
   config = config or {}
   M.collect()
 
-  local lines = { " Buffers" }
+  local total, modified = #M.entries, 0
+  local err_n, warn_n = 0, 0
+  local SEV = vim.diagnostic.severity
+  for _, entry in ipairs(M.entries) do
+    if entry.modified then modified = modified + 1 end
+    local sev = diagnostics.severity(entry.path, false)
+    if sev == SEV.ERROR then
+      err_n = err_n + 1
+    elseif sev == SEV.WARN then
+      warn_n = warn_n + 1
+    end
+  end
+
+  local header = " Buffers  " .. total
+  local header_hl = {
+    { start = 1, end_ = 8, hl = "SuperTreeDirectory" }, -- "Buffers"
+    { start = 10, end_ = #header, hl = "SuperTreeIndent" },
+  }
+  if modified > 0 then
+    local seg = "  +" .. modified
+    local s = #header
+    header = header .. seg
+    table.insert(header_hl, { start = s, end_ = #header, hl = "SuperTreeGitModified" })
+  end
+
+  local lines = { header }
   local icon_hl, name_hl, virt_marks = {}, {}, {}
   local current = vim.api.nvim_get_current_buf()
+
+  local header_vt = {}
+  if err_n > 0 then
+    table.insert(header_vt, { " " .. err_n, "SuperTreeDiagnosticError" })
+  end
+  if warn_n > 0 then
+    table.insert(header_vt, { " " .. warn_n, "SuperTreeDiagnosticWarn" })
+  end
+  if #header_vt > 0 then
+    table.insert(virt_marks, { line = 0, chunks = header_vt })
+  end
 
   for i, entry in ipairs(M.entries) do
     local icon = entry.icon or icons.ICON_FILE
@@ -103,10 +139,12 @@ function M.render(buf, config)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
 
-  vim.api.nvim_buf_set_extmark(buf, ns, 0, 0, {
-    end_col  = #lines[1],
-    hl_group = "SuperTreeDirectory",
-  })
+  for _, pos in ipairs(header_hl) do
+    vim.api.nvim_buf_set_extmark(buf, ns, 0, pos.start, {
+      end_col  = pos.end_,
+      hl_group = pos.hl,
+    })
+  end
 
   for _, pos in ipairs(icon_hl) do
     vim.api.nvim_buf_set_extmark(buf, ns, pos.line, pos.start, {
@@ -130,6 +168,10 @@ function M.render(buf, config)
 
   vim.bo[buf].modifiable = false
   vim.bo[buf].readonly   = true
+
+  if window.buffers_win and vim.api.nvim_win_is_valid(window.buffers_win) then
+    vim.wo[window.buffers_win].statusline = header
+  end
 end
 
 return M

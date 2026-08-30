@@ -1,5 +1,8 @@
 # super-tree.nvim
-A Neovim file explorer with neo-tree-style navigation, git status, and file operations.
+
+A feature-rich Neovim file explorer with multi-repo git support, file operations and more.
+
+![SuperTree](super-tree-buffers.png)
 
 ## Features
 
@@ -9,14 +12,9 @@ A Neovim file explorer with neo-tree-style navigation, git status, and file oper
 - Follows the current file; `.` / `<BS>` change the tree root
 - Three display modes: floating popup, pinned split, or persistent sidebar
 - Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, upstream, ahead/behind, stash, lines added/removed)
-- Optional buffers pane above the tree (independently scrollable and resizable; `B` to toggle)
+- Buffers pane above the tree (independently scrollable and resizable; `B` to toggle)
 - LSP diagnostic icons on files and directories (bubbled to parents)
 - Background git refresh via filesystem watchers; darker sidebar background derived from the colorscheme
-
-## Roadmap
-
-- Git-status view
-- Window picker
 
 ## Requirements
 
@@ -57,6 +55,24 @@ Then `require("super-tree").setup()`.
 | `:SuperTreeClose` | Close |
 | `:SuperTreeFocus` | Focus (opens if closed) |
 | `:SuperTreeReveal` | Reveal the current file |
+
+Bind the toggle globally (for example to `\`):
+
+```lua
+vim.keymap.set("n", "\\", function()
+  require("super-tree").toggle()
+end, { desc = "SuperTree" })
+```
+
+With lazy.nvim:
+
+```lua
+return {
+  "keathmilligan/super-tree.nvim",
+  keys = { { "\\", "<cmd>SuperTree<cr>", desc = "SuperTree" } },
+  opts = {},
+}
+```
 
 ## Keybindings
 
@@ -109,7 +125,7 @@ require("super-tree").setup({
     find_by_full_path_words = false,
   },
   buffers = {
-    enable = false,
+    enable = true,
     height = 8,
   },
   diagnostics = {
@@ -133,7 +149,7 @@ require("super-tree").setup({
 
 ### Buffers
 
-Disabled by default. Set `buffers.enable = true` or press `B`. The pane is a real window above the tree (`<C-w>k` / `<C-w>j` to move, resize with `<C-w>+/-` or the mouse). `<Enter>` opens, `d` deletes the buffer.
+On by default (`buffers.enable = false` to disable). Press `B` to toggle. The pane is a real window above the tree (`<C-w>k` / `<C-w>j` to move, resize with `<C-w>+/-` or the mouse). `<Enter>` opens, `d` deletes the buffer.
 
 ### Diagnostics
 
