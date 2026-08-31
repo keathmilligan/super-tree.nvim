@@ -252,49 +252,45 @@ end
 -- Indentation prefix
 -- ---------------------------------------------------------------------------
 
--- Build the indent prefix for an entry.
--- Returns the full prefix string.
--- `skip_marker_at_level[i] == true` means depth i was the last child at that
--- level, so its ancestor column draws a space instead of │.
+-- One-column left pad (tree shifted right of the window edge). Connector
+-- columns start at depth 0 so cwd children (including git repos) join
+-- the same ├/└/│ spine as nested folders.
+local LEAD = " "
+
+-- `skip_marker_at_level[d] == true` means the item at depth d was the last
+-- child, so descendants draw a space instead of │ in that column.
 local function build_prefix(entry, skip_marker_at_level)
-  local level = entry.depth
-
-  if level == 0 then
-    return "   "  -- 3-space padding, no connector for direct cwd children
-  end
-
-  local parts = { "   " }  -- leading padding matching depth-0 indent
-
-  for i = 1, level do
+  local parts = { LEAD }
+  for d = 0, entry.depth do
     local char
-    if i == level then
+    if d == entry.depth then
       char = entry.is_last_child and "└" or "├"
     else
-      char = skip_marker_at_level[i] and " " or "│"
+      char = skip_marker_at_level[d] and " " or "│"
     end
     table.insert(parts, char .. " ")
   end
-
   return table.concat(parts)
 end
 
--- Prefix for the git-status line under a repo directory: same ancestor
--- columns as the dir, but the connector is │ (or a space if last child)
--- so the branch line hangs under the name without a second ├/└.
+-- Git-status line under a repo: same ancestor columns as the dir, but the
+-- dir's connector is │ so the spine continues through this extra line to
+-- children and later siblings. Last-child collapsed repos use a space
+-- (nothing below). Last-child expanded repos add a │ at the child column
+-- so the subtree stays attached.
 local function build_status_prefix(entry, skip_marker_at_level)
-  local level = entry.depth
-  if level == 0 then
-    return "   "
-  end
-  local parts = { "   " }
-  for i = 1, level do
+  local parts = { LEAD }
+  for d = 0, entry.depth do
     local char
-    if i == level then
+    if d == entry.depth then
       char = entry.is_last_child and " " or "│"
     else
-      char = skip_marker_at_level[i] and " " or "│"
+      char = skip_marker_at_level[d] and " " or "│"
     end
     table.insert(parts, char .. " ")
+  end
+  if entry.is_last_child and entry.expanded then
+    table.insert(parts, "│ ")
   end
   return table.concat(parts)
 end

@@ -315,6 +315,13 @@ local function sidebar_actions()
       local e = buffers.entry_at_cursor()
       if e then open_listed(e.bufnr, "edit") end
     end,
+    -- h / <Left>: same idea as the tree (collapse / parent). The buffers
+    -- list is flat, so this jumps to the file tree below.
+    buffers_collapse = function()
+      if window.sidebar_win and vim.api.nvim_win_is_valid(window.sidebar_win) then
+        vim.api.nvim_set_current_win(window.sidebar_win)
+      end
+    end,
     open_buffer_split = function()
       local e = buffers.entry_at_cursor()
       if e then open_listed(e.bufnr, "split") end
