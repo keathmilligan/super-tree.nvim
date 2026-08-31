@@ -273,11 +273,9 @@ local function build_prefix(entry, skip_marker_at_level)
   return table.concat(parts)
 end
 
--- Git-status line under a repo: same ancestor columns as the dir, but the
--- dir's connector is │ so the spine continues through this extra line to
--- children and later siblings. Last-child collapsed repos use a space
--- (nothing below). Last-child expanded repos add a │ at the child column
--- so the subtree stays attached.
+-- Git-status line under a repo: same ancestor columns as the dir, │ at the
+-- dir's depth when more siblings follow, and an extra │ at the child column
+-- when the repo is expanded so the subtree stays attached through this line.
 local function build_status_prefix(entry, skip_marker_at_level)
   local parts = { LEAD }
   for d = 0, entry.depth do
@@ -289,7 +287,7 @@ local function build_status_prefix(entry, skip_marker_at_level)
     end
     table.insert(parts, char .. " ")
   end
-  if entry.is_last_child and entry.expanded then
+  if entry.expanded then
     table.insert(parts, "│ ")
   end
   return table.concat(parts)
@@ -573,10 +571,21 @@ end
 -- Write tree contents into `sidebar_buf` with extmark highlights.
 -- `config` is the full plugin config table.
 function M.render(sidebar_buf, config)
-  -- Mark is_last_child on each entry (next entry is shallower or nil).
+  -- Mark is_last_child: no later peer at this depth before leaving the parent.
+  -- Must skip descendants (expanded children), or an open folder is never
+  -- treated as last and its ├/│ spine never closes.
   for i, entry in ipairs(M.tree_data) do
-    local next_entry = M.tree_data[i + 1]
-    entry.is_last_child = (next_entry == nil or next_entry.depth < entry.depth)
+    entry.is_last_child = true
+    for j = i + 1, #M.tree_data do
+      local d = M.tree_data[j].depth
+      if d == entry.depth then
+        entry.is_last_child = false
+        break
+      end
+      if d < entry.depth then
+        break
+      end
+    end
   end
 
   vim.api.nvim_buf_clear_namespace(sidebar_buf, ns, 0, -1)
@@ -647,7 +656,10 @@ function M.render(sidebar_buf, config)
   if status_enabled then
     local root_status = git.repo_status[cwd]
     if root_status then
-      local status_line = string.rep(" ", vim.fn.strdisplaywidth(root_icon))
+      -- │ in the same column as the ├/└ of cwd children, so the spine
+      -- continues through this status line.
+      local cwd_st_prefix = LEAD .. "│ "
+      local status_line = cwd_st_prefix
       local first = true
       for _, ch in ipairs(root_left_chunks(root_status, symbols, config.git.status and config.git.status.show_remote)) do
         if not first then status_line = status_line .. " " end
@@ -656,6 +668,7 @@ function M.render(sidebar_buf, config)
         status_line = status_line .. ch[1]
         table.insert(git_hl, { line = 1, start = seg_start, end_ = #status_line, hl = ch[2] })
       end
+      table.insert(indent_hl, { line = 1, start = 0, end_ = #cwd_st_prefix })
       table.insert(lines, status_line)
 
       local right = root_right_chunks(root_status, symbols)
@@ -670,6 +683,8 @@ function M.render(sidebar_buf, config)
 
   for _, entry in ipairs(M.tree_data) do
     local level = entry.depth
+    local repo_st = status_enabled and entry.is_dir and git.repo_status[entry.path] or nil
+    local use_multiline = multiline and repo_st
     skip_marker_at_level[level] = entry.is_last_child
 
     local prefix = build_prefix(entry, skip_marker_at_level)
@@ -739,9 +754,6 @@ function M.render(sidebar_buf, config)
     -- (same layout as the cwd root) when git.multiline is on; otherwise
     -- a compact right-aligned summary, dropping the branch name if it
     -- would overlap the path.
-    local repo_st = status_enabled and entry.is_dir and git.repo_status[entry.path] or nil
-    local use_multiline = multiline and repo_st
-
     local vt_chunks = {}
     if status_enabled and not use_multiline then
       if repo_st then
@@ -792,8 +804,13 @@ function M.render(sidebar_buf, config)
 
     if use_multiline then
       local st_prefix = build_status_prefix(entry, skip_marker_at_level)
-      local pad = string.rep(" ", vim.fn.strdisplaywidth(icon_with_space))
-      local status_line = st_prefix .. pad
+      -- Pad so the branch glyph lines up with the first character of the name.
+      local name_col = vim.fn.strdisplaywidth(prefix .. icon_with_space)
+      local gap = name_col - vim.fn.strdisplaywidth(st_prefix)
+      if gap > 0 then
+        st_prefix = st_prefix .. string.rep(" ", gap)
+      end
+      local status_line = st_prefix
       local st_lnum = #lines  -- 0-indexed after the upcoming insert
       local first = true
       for _, ch in ipairs(root_left_chunks(repo_st, symbols, config.git.status and config.git.status.show_remote)) do
