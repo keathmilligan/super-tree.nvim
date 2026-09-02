@@ -493,6 +493,100 @@ local function width_for_buf(buf)
   return vim.o.columns
 end
 
+local function truncate_to_width(text, max_w)
+  if max_w <= 0 then return "", true end
+  if vim.fn.strdisplaywidth(text) <= max_w then return text, false end
+  local out, w = {}, 0
+  for i = 0, vim.fn.strchars(text) - 1 do
+    local ch = vim.fn.strcharpart(text, i, 1)
+    local cw = vim.fn.strdisplaywidth(ch)
+    if w + cw > max_w then
+      return table.concat(out), true
+    end
+    out[#out + 1] = ch
+    w = w + cw
+  end
+  return table.concat(out), false
+end
+
+local function chunks_width(chunks)
+  if #chunks == 0 then return 0 end
+  local w = #chunks - 1
+  for _, ch in ipairs(chunks) do
+    w = w + vim.fn.strdisplaywidth(ch[1])
+  end
+  return w
+end
+
+local BRANCH_FADE = {
+  "SuperTreeGitBranchFade1",
+  "SuperTreeGitBranchFade2",
+  "SuperTreeGitBranchFade3",
+}
+
+-- Dim the last up to 3 characters of `text` starting at byte `byte_start`.
+local function add_branch_fade(lnum, byte_start, text, git_hl)
+  local n = vim.fn.strchars(text)
+  local fade_n = math.min(3, n)
+  if fade_n == 0 then return end
+  local byte = byte_start
+  for i = 0, n - 1 do
+    local ch = vim.fn.strcharpart(text, i, 1)
+    local nextb = byte + #ch
+    local from_end = n - 1 - i
+    if from_end < fade_n then
+      table.insert(git_hl, {
+        line  = lnum,
+        start = byte,
+        end_  = nextb,
+        hl    = BRANCH_FADE[fade_n - from_end],
+      })
+    end
+    byte = nextb
+  end
+end
+
+-- Append left-hand status chunks to `line`, shrinking the branch name so the
+-- right-aligned git status still fits. Truncated names fade out on the last
+-- three characters.
+local function append_fitted_left(line, chunks, lnum, git_hl, prefix_w, right_w, win_w)
+  local avail = win_w - prefix_w - right_w - 1
+  if avail < 0 then avail = 0 end
+  local truncated = false
+
+  if chunks_width(chunks) > avail and chunks[1] then
+    local rest = {}
+    for i = 2, #chunks do
+      rest[#rest + 1] = chunks[i]
+    end
+    local rest_w = chunks_width(rest)
+    if #rest > 0 then rest_w = rest_w + 1 end
+    local branch_avail = avail - rest_w
+    local text, tr = truncate_to_width(chunks[1][1], math.max(branch_avail, 0))
+    truncated = tr
+    chunks = { { text, chunks[1][2] } }
+    for _, c in ipairs(rest) do
+      chunks[#chunks + 1] = c
+    end
+    while chunks_width(chunks) > avail and #chunks > 1 do
+      chunks[#chunks] = nil
+    end
+  end
+
+  local first = true
+  for ci, ch in ipairs(chunks) do
+    if not first then line = line .. " " end
+    first = false
+    local seg_start = #line
+    line = line .. ch[1]
+    table.insert(git_hl, { line = lnum, start = seg_start, end_ = #line, hl = ch[2] })
+    if ci == 1 and truncated then
+      add_branch_fade(lnum, seg_start, ch[1], git_hl)
+    end
+  end
+  return line
+end
+
 -- Left-hand chunks of the cwd root status line: branch identity.
 -- Rendered as literal text aligned with the root path label.
 local function root_left_chunks(st, symbols, show_remote)
@@ -659,21 +753,20 @@ function M.render(sidebar_buf, config)
       -- │ in the same column as the ├/└ of cwd children, so the spine
       -- continues through this status line.
       local cwd_st_prefix = LEAD .. "│ "
-      local status_line = cwd_st_prefix
-      local first = true
-      for _, ch in ipairs(root_left_chunks(root_status, symbols, config.git.status and config.git.status.show_remote)) do
-        if not first then status_line = status_line .. " " end
-        first = false
-        local seg_start = #status_line
-        status_line = status_line .. ch[1]
-        table.insert(git_hl, { line = 1, start = seg_start, end_ = #status_line, hl = ch[2] })
-      end
+      local right = root_right_chunks(root_status, symbols)
+      local right_vt = to_virt_text(right)
+      local left = root_left_chunks(root_status, symbols, config.git.status and config.git.status.show_remote)
+      local status_line = append_fitted_left(
+        cwd_st_prefix, left, 1, git_hl,
+        vim.fn.strdisplaywidth(cwd_st_prefix),
+        virt_text_width(right_vt),
+        width_for_buf(sidebar_buf)
+      )
       table.insert(indent_hl, { line = 1, start = 0, end_ = #cwd_st_prefix })
       table.insert(lines, status_line)
 
-      local right = root_right_chunks(root_status, symbols)
-      if #right > 0 then
-        table.insert(virt_marks, { line = 1, chunks = to_virt_text(right) })
+      if #right_vt > 0 then
+        table.insert(virt_marks, { line = 1, chunks = right_vt })
       end
       M.header_lines = 2
     end
@@ -810,21 +903,7 @@ function M.render(sidebar_buf, config)
       if gap > 0 then
         st_prefix = st_prefix .. string.rep(" ", gap)
       end
-      local status_line = st_prefix
       local st_lnum = #lines  -- 0-indexed after the upcoming insert
-      local first = true
-      for _, ch in ipairs(root_left_chunks(repo_st, symbols, config.git.status and config.git.status.show_remote)) do
-        if not first then status_line = status_line .. " " end
-        first = false
-        local seg_start = #status_line
-        status_line = status_line .. ch[1]
-        table.insert(git_hl, { line = st_lnum, start = seg_start, end_ = #status_line, hl = ch[2] })
-      end
-      table.insert(lines, status_line)
-      M.row_entry[#lines] = entry
-      if #st_prefix > 0 then
-        table.insert(indent_hl, { line = st_lnum, start = 0, end_ = #st_prefix })
-      end
       local right = root_right_chunks(repo_st, symbols)
       if config.diagnostics and config.diagnostics.enable ~= false then
         local dchunk = diagnostics.chunk(entry.path, true, config)
@@ -832,8 +911,21 @@ function M.render(sidebar_buf, config)
           table.insert(right, dchunk)
         end
       end
-      if #right > 0 then
-        table.insert(virt_marks, { line = st_lnum, chunks = to_virt_text(right) })
+      local right_vt = to_virt_text(right)
+      local left = root_left_chunks(repo_st, symbols, config.git.status and config.git.status.show_remote)
+      local status_line = append_fitted_left(
+        st_prefix, left, st_lnum, git_hl,
+        vim.fn.strdisplaywidth(st_prefix),
+        virt_text_width(right_vt),
+        width_for_buf(sidebar_buf)
+      )
+      table.insert(lines, status_line)
+      M.row_entry[#lines] = entry
+      if #st_prefix > 0 then
+        table.insert(indent_hl, { line = st_lnum, start = 0, end_ = #st_prefix })
+      end
+      if #right_vt > 0 then
+        table.insert(virt_marks, { line = st_lnum, chunks = right_vt })
       end
     end
   end
