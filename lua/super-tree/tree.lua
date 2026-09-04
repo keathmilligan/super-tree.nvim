@@ -524,8 +524,15 @@ local BRANCH_FADE = {
   "SuperTreeGitBranchFade3",
 }
 
+local NAME_FADE = {
+  "SuperTreeNameFade1",
+  "SuperTreeNameFade2",
+  "SuperTreeNameFade3",
+}
+
 -- Dim the last up to 3 characters of `text` starting at byte `byte_start`.
-local function add_branch_fade(lnum, byte_start, text, git_hl)
+local function add_fade_marks(lnum, byte_start, text, git_hl, fade_groups)
+  fade_groups = fade_groups or BRANCH_FADE
   local n = vim.fn.strchars(text)
   local fade_n = math.min(3, n)
   if fade_n == 0 then return end
@@ -539,7 +546,7 @@ local function add_branch_fade(lnum, byte_start, text, git_hl)
         line  = lnum,
         start = byte,
         end_  = nextb,
-        hl    = BRANCH_FADE[fade_n - from_end],
+        hl    = fade_groups[fade_n - from_end],
       })
     end
     byte = nextb
@@ -581,7 +588,7 @@ local function append_fitted_left(line, chunks, lnum, git_hl, prefix_w, right_w,
     line = line .. ch[1]
     table.insert(git_hl, { line = lnum, start = seg_start, end_ = #line, hl = ch[2] })
     if ci == 1 and truncated then
-      add_branch_fade(lnum, seg_start, ch[1], git_hl)
+      add_fade_marks(lnum, seg_start, ch[1], git_hl, BRANCH_FADE)
     end
   end
   return line
@@ -813,46 +820,18 @@ function M.render(sidebar_buf, config)
       clean_badge = " " .. symbols.clean
     end
 
-    local line = prefix .. icon_with_space .. entry.name .. git_badge .. clean_badge
-    table.insert(lines, line)
-    M.row_entry[#lines] = entry
-
-    local lnum            = #lines - 1  -- 0-indexed buffer line number
-    local icon_byte_start = #prefix
-    local icon_byte_end   = icon_byte_start + #icon
-    local name_byte_start = #prefix + #icon_with_space
-    local name_byte_end   = name_byte_start + #entry.name
-
-    if #prefix > 0 then
-      table.insert(indent_hl, { line = lnum, start = 0, end_ = #prefix })
-    end
-
-    if not entry.is_dir and icon_highlight then
-      table.insert(icon_hl, { line = lnum, start = icon_byte_start, end_ = icon_byte_end, hl = icon_highlight })
-    end
-
-    if entry.is_dir then
-      table.insert(dir_hl, { line = lnum, start = name_byte_start, end_ = name_byte_end })
-      if git_badge_hl and #git_badge > 0 then
-        local badge_start = name_byte_start + #entry.name
-        table.insert(git_hl, { line = lnum, start = badge_start, end_ = badge_start + #git_badge, hl = git_badge_hl })
-      end
-      if #clean_badge > 0 then
-        local clean_start = name_byte_start + #entry.name + #git_badge
-        table.insert(git_hl, { line = lnum, start = clean_start, end_ = clean_start + #clean_badge, hl = "SuperTreeGitClean" })
-      end
-    end
-
     -- Git status and diagnostics. Repo directories use a second line
     -- (same layout as the cwd root) when git.multiline is on; otherwise
     -- a compact right-aligned summary, dropping the branch name if it
     -- would overlap the path.
+    local probe = prefix .. icon_with_space .. entry.name .. git_badge .. clean_badge
     local vt_chunks = {}
+    local name_status_hl = nil
     if status_enabled and not use_multiline then
       if repo_st then
         local with_branch = to_virt_text(branch_chunks(repo_st, symbols))
         local status_only = to_virt_text(repo_status_chunks(repo_st, symbols))
-        local line_w = vim.fn.strdisplaywidth(line)
+        local line_w = vim.fn.strdisplaywidth(probe)
         local diag_w = 0
         if config.diagnostics and config.diagnostics.enable ~= false then
           local dchunk = diagnostics.chunk(entry.path, entry.is_dir, config)
@@ -873,13 +852,11 @@ function M.render(sidebar_buf, config)
       else
         local code = lookup_status(entry.path, entry.is_dir)
         if code then
-          local chunks, name_status_hl = status_chunks(code, symbols)
+          local chunks, nhl = status_chunks(code, symbols)
+          name_status_hl = nhl
           if chunks then
             for _, ch in ipairs(to_virt_text(chunks)) do
               table.insert(vt_chunks, ch)
-            end
-            if not entry.is_dir and name_status_hl then
-              table.insert(git_hl, { line = lnum, start = name_byte_start, end_ = name_byte_end, hl = name_status_hl })
             end
           end
         end
@@ -891,6 +868,58 @@ function M.render(sidebar_buf, config)
         table.insert(vt_chunks, { " " .. dchunk[1], dchunk[2] })
       end
     end
+
+    -- Shrink the name so right-aligned status indicators do not overlap it.
+    local display_name = entry.name
+    local name_truncated = false
+    local win_w = width_for_buf(sidebar_buf)
+    local right_w = virt_text_width(vt_chunks)
+    local head = prefix .. icon_with_space
+    local avail = win_w - right_w - 1
+    local head_w = vim.fn.strdisplaywidth(head)
+    if avail < head_w then avail = head_w end
+    if vim.fn.strdisplaywidth(head .. display_name .. git_badge .. clean_badge) > avail then
+      git_badge, clean_badge = "", ""
+      if vim.fn.strdisplaywidth(head .. display_name) > avail then
+        display_name, name_truncated = truncate_to_width(entry.name, avail - head_w)
+      end
+    end
+
+    local line = head .. display_name .. git_badge .. clean_badge
+    table.insert(lines, line)
+    M.row_entry[#lines] = entry
+
+    local lnum            = #lines - 1  -- 0-indexed buffer line number
+    local icon_byte_start = #prefix
+    local icon_byte_end   = icon_byte_start + #icon
+    local name_byte_start = #prefix + #icon_with_space
+    local name_byte_end   = name_byte_start + #display_name
+
+    if #prefix > 0 then
+      table.insert(indent_hl, { line = lnum, start = 0, end_ = #prefix })
+    end
+
+    if not entry.is_dir and icon_highlight then
+      table.insert(icon_hl, { line = lnum, start = icon_byte_start, end_ = icon_byte_end, hl = icon_highlight })
+    end
+
+    if entry.is_dir then
+      table.insert(dir_hl, { line = lnum, start = name_byte_start, end_ = name_byte_end })
+      if git_badge_hl and #git_badge > 0 then
+        local badge_start = name_byte_start + #display_name
+        table.insert(git_hl, { line = lnum, start = badge_start, end_ = badge_start + #git_badge, hl = git_badge_hl })
+      end
+      if #clean_badge > 0 then
+        local clean_start = name_byte_start + #display_name + #git_badge
+        table.insert(git_hl, { line = lnum, start = clean_start, end_ = clean_start + #clean_badge, hl = "SuperTreeGitClean" })
+      end
+    elseif name_status_hl then
+      table.insert(git_hl, { line = lnum, start = name_byte_start, end_ = name_byte_end, hl = name_status_hl })
+    end
+    if name_truncated and #display_name > 0 then
+      add_fade_marks(lnum, name_byte_start, display_name, git_hl, NAME_FADE)
+    end
+
     if #vt_chunks > 0 then
       table.insert(virt_marks, { line = lnum, chunks = vt_chunks })
     end
