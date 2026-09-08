@@ -158,16 +158,10 @@ local function open_current(mode)
     return
   end
 
-  local target = window.find_editor_win()
-  if target then
-    vim.api.nvim_set_current_win(target)
-    vim.cmd(cmd .. " " .. path)
-  else
-    -- No editor window exists; make one beside the sidebar.
-    vim.api.nvim_set_current_win(window.sidebar_win)
-    vim.cmd("rightbelow vertical split")
-    vim.cmd("edit " .. path)
-  end
+  local target = window.ensure_editor_win(config.width)
+  if not target then return end
+  vim.api.nvim_set_current_win(target)
+  vim.cmd(cmd .. " " .. path)
 end
 
 -- Open a listed buffer (from the buffers pane) in an editor window.
@@ -181,15 +175,10 @@ local function open_listed(bufnr, mode)
     return
   end
 
-  local target = window.find_editor_win()
-  if target then
-    vim.api.nvim_set_current_win(target)
-    vim.cmd(cmd .. " " .. bufnr)
-  else
-    vim.api.nvim_set_current_win(window.sidebar_win)
-    vim.cmd("rightbelow vertical split")
-    vim.cmd("buffer " .. bufnr)
-  end
+  local target = window.ensure_editor_win(config.width)
+  if not target then return end
+  vim.api.nvim_set_current_win(target)
+  vim.cmd(cmd .. " " .. bufnr)
 end
 
 local function toggle_expand()
@@ -342,6 +331,7 @@ local function sidebar_actions()
           return
         end
       end
+      window.unshow_buffer(e.bufnr)
       pcall(vim.cmd, "bdelete! " .. e.bufnr)
       render_buffers()
     end,
@@ -537,6 +527,7 @@ end
 function M.setup(opts)
   config = vim.tbl_deep_extend("force", config, opts or {})
   window.open_files_do_not_replace_types = config.open_files_do_not_replace_types
+  window.sidebar_width = config.width
 
   define_highlights()
 
@@ -585,7 +576,8 @@ function M.setup(opts)
   })
 
   -- Clean up plugin state when the sidebar window is closed externally
-  -- (e.g. :q inside the sidebar, or <C-w>c).
+  -- (e.g. :q inside the sidebar, or <C-w>c). If an editor window closes
+  -- and none remain, restore one so the tree does not fill the tab.
   vim.api.nvim_create_autocmd("WinClosed", {
     group    = group,
     callback = function(args)
@@ -594,10 +586,21 @@ function M.setup(opts)
         window.sidebar_win = nil
         window.close_buffers_window()
         git.reset()
+        return
       elseif win and win == window.buffers_win then
         window.buffers_win = nil
         window.buffers_visible = false
+        return
       end
+
+      if config.mode == "floating" then return end
+      vim.schedule(function()
+        if vim.v.exiting ~= vim.NIL then return end
+        if config.mode == "floating" then return end
+        if not window.is_open() then return end
+        if window.find_editor_win() then return end
+        window.ensure_editor_win(config.width)
+      end)
     end,
   })
 
@@ -615,6 +618,29 @@ function M.setup(opts)
       if name ~= "" then
         git.refresh_path(name)
       end
+    end,
+  })
+
+  -- Safety net: if focus lands on SuperTree and no editor window remains,
+  -- create one (same invariant as WinClosed). Nested so the new split's
+  -- events still fire.
+  vim.api.nvim_create_autocmd("BufEnter", {
+    group    = group,
+    nested   = true,
+    callback = function(args)
+      if config.mode == "floating" then return end
+      if not window.is_open() then return end
+      if args.buf ~= window.sidebar_buf and args.buf ~= window.buffers_buf then return end
+      local curwin = vim.api.nvim_get_current_win()
+      if curwin ~= window.sidebar_win and curwin ~= window.buffers_win then return end
+      if window.find_editor_win() then return end
+      vim.schedule(function()
+        if vim.v.exiting ~= vim.NIL then return end
+        if config.mode == "floating" then return end
+        if not window.is_open() then return end
+        if window.find_editor_win() then return end
+        window.ensure_editor_win(config.width)
+      end)
     end,
   })
 

@@ -151,7 +151,7 @@ require("super-tree").setup({
 
 ### Buffers
 
-On by default (`buffers.enable = false` to disable). Press `B` to toggle. The pane is a real window above the tree (`<C-w>k` / `<C-w>j` to move, resize with `<C-w>+/-` or the mouse). `<Enter>` opens, `d` deletes the buffer.
+On by default (`buffers.enable = false` to disable). Press `B` to toggle. The pane is a real window above the tree (`<C-w>k` / `<C-w>j` to move, resize with `<C-w>+/-` or the mouse). `<Enter>` opens, `d` deletes the buffer (the editor window stays and shows the most recently used buffer, or a new unnamed buffer if none remain).
 
 ### Diagnostics
 
@@ -163,9 +163,9 @@ Right-aligned signs on files with LSP diagnostics (same text as the gutter: `vim
 
 ### Modes
 
-- **sidebar** (default): persistent split; stays open when files are opened; only `q` closes; quitting the last editor window closes it too
+- **sidebar** (default): persistent split; stays open when files are opened; only `q` closes; quitting the last editor window closes it too. Closing a buffer keeps the sidebar and shows the most recently used buffer, or a new unnamed buffer if none remain. Toggling the tree closed never leaves Neovim without a window.
 - **floating**: overlay; `q` / `<Esc>` close
-- **pinned**: split; `q` / `<Esc>` close
+- **pinned**: split; `q` / `<Esc>` close. Closing a buffer keeps the split and shows the most recently used buffer, or a new unnamed buffer if none remain.
 
 ### Git status
 

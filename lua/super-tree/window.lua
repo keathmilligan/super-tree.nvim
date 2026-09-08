@@ -6,6 +6,7 @@ local M = {}
 
 M.sidebar_buf = nil
 M.sidebar_win = nil
+M.sidebar_width = 50
 M.buffers_buf = nil
 M.buffers_win = nil
 M.buffers_visible = false
@@ -107,17 +108,10 @@ function M.guard_window(win, buf)
         -- Restore the sidebar buffer in the sidebar window.
         vim.api.nvim_win_set_buf(win, buf)
 
-        -- Find an existing non-sidebar window to send the buffer to.
-        local target_win = M.find_editor_win()
-
+        local target_win = M.ensure_editor_win(M.sidebar_width)
         if target_win then
           vim.api.nvim_set_current_win(target_win)
           vim.api.nvim_win_set_buf(target_win, entered_buf)
-        else
-          -- No suitable window exists; open a new split to the right of the sidebar.
-          vim.api.nvim_set_current_win(win)
-          vim.cmd("rightbelow vertical split")
-          vim.api.nvim_win_set_buf(vim.api.nvim_get_current_win(), entered_buf)
         end
       end)
     end,
@@ -140,6 +134,7 @@ local WINHIGHLIGHT = table.concat({
 }, ",")
 
 function M.create_floating_window(buf, width)
+  M.sidebar_width = width
   local tabline_height = get_tabline_height()
   local win_config = {
     relative = "editor",
@@ -290,6 +285,7 @@ function M.close_buffers_window()
 end
 
 function M.create_pinned_window(buf, width)
+  M.sidebar_width = width
   vim.cmd("topleft vertical split")
   local win = vim.api.nvim_get_current_win()
   vim.api.nvim_win_set_buf(win, buf)
@@ -348,6 +344,107 @@ function M.find_editor_win()
     if usable(w) then return w end
   end
   return nil
+end
+
+local function is_plugin_ft(bufnr)
+  local ft = vim.bo[bufnr].filetype
+  return ft == "SuperTree" or ft == "SuperTreeFilter"
+end
+
+-- Most recently used listed normal buffer, excluding `exclude` (a bufnr).
+-- SuperTree buffers and non-file buftypes are skipped. Returns nil if none.
+function M.find_replacement_buf(exclude)
+  local best, best_time = nil, -1
+  for _, info in ipairs(vim.fn.getbufinfo({ buflisted = 1 })) do
+    local b = info.bufnr
+    if b ~= exclude and vim.api.nvim_buf_is_valid(b) and not is_plugin_ft(b) then
+      local bt = vim.bo[b].buftype
+      if bt == "" or bt == "acwrite" then
+        local t = info.lastused or 0
+        if t > best_time then
+          best, best_time = b, t
+        end
+      end
+    end
+  end
+  return best
+end
+
+local function new_unnamed_buf()
+  return vim.api.nvim_create_buf(true, false)
+end
+
+-- Switch every non-SuperTree window off `bufnr` so a later :bdelete does
+-- not close those windows. Replacement is the MRU listed buffer, or a new
+-- unnamed listed buffer if none remain.
+function M.unshow_buffer(bufnr)
+  if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
+  local replacement = M.find_replacement_buf(bufnr) or new_unnamed_buf()
+  for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
+    if win ~= M.sidebar_win and win ~= M.buffers_win
+        and vim.api.nvim_win_is_valid(win)
+        and vim.api.nvim_win_get_config(win).relative == "" then
+      vim.api.nvim_win_set_buf(win, replacement)
+    end
+  end
+end
+
+local function restore_sidebar_width(width)
+  width = width or M.sidebar_width
+  if not width then return end
+  if M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win) then
+    vim.api.nvim_win_set_width(M.sidebar_win, width)
+  end
+end
+
+-- :vsplit/:vnew copy window-local options from the current window.
+-- After splitting from the sidebar, restore normal editor settings.
+local function reset_editor_win_opts(win)
+  if not win or not vim.api.nvim_win_is_valid(win) then return end
+  vim.wo[win].winhighlight   = ""
+  vim.wo[win].winfixwidth    = false
+  vim.wo[win].winfixheight   = false
+  vim.wo[win].statusline     = ""
+  vim.wo[win].signcolumn     = vim.go.signcolumn
+  vim.wo[win].foldcolumn     = vim.go.foldcolumn
+  vim.wo[win].number         = vim.go.number
+  vim.wo[win].relativenumber = vim.go.relativenumber
+  vim.wo[win].cursorline     = vim.go.cursorline
+  vim.wo[win].wrap           = vim.go.wrap
+  vim.wo[win].spell          = vim.go.spell
+  vim.wo[win].scrolloff      = vim.go.scrolloff
+  vim.wo[win].sidescrolloff  = vim.go.sidescrolloff
+end
+
+-- Return an editor window, creating a full-height split beside the tree
+-- if none exists. No-op for floating mode. The new window shows the MRU
+-- listed buffer, or a new unnamed listed buffer.
+function M.ensure_editor_win(width)
+  local existing = M.find_editor_win()
+  if existing then return existing end
+  if not M.is_open() then return nil end
+  if vim.api.nvim_win_get_config(M.sidebar_win).relative ~= "" then
+    return nil
+  end
+
+  local buf = M.find_replacement_buf() or new_unnamed_buf()
+  vim.api.nvim_set_current_win(M.sidebar_win)
+  vim.cmd("botright vsplit")
+  local win = vim.api.nvim_get_current_win()
+  reset_editor_win_opts(win)
+  vim.api.nvim_win_set_buf(win, buf)
+  restore_sidebar_width(width)
+  return win
+end
+
+local function is_last_non_float(win)
+  for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if w ~= win and vim.api.nvim_win_is_valid(w)
+        and vim.api.nvim_win_get_config(w).relative == "" then
+      return false
+    end
+  end
+  return true
 end
 
 -- Jump out of the sidebar into an editor window.
@@ -453,10 +550,18 @@ end
 
 function M.close_window()
   M.close_buffers_window()
-  if M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win) then
-    vim.api.nvim_win_close(M.sidebar_win, true)
-    M.sidebar_win = nil
+  if not (M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win)) then
+    return
   end
+  if is_last_non_float(M.sidebar_win) then
+    pcall(function()
+      vim.api.nvim_set_current_win(M.sidebar_win)
+      vim.cmd("botright vnew")
+      reset_editor_win_opts(vim.api.nvim_get_current_win())
+    end)
+  end
+  pcall(vim.api.nvim_win_close, M.sidebar_win, true)
+  M.sidebar_win = nil
 end
 
 function M.setup_buffers_keymaps(buf, actions, keymap_opts)
