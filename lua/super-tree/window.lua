@@ -261,8 +261,10 @@ function M.close_buffers_window()
   if M.buffers_win and vim.api.nvim_win_is_valid(M.buffers_win) then
     local tree_ok = M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win)
     local cfg = tree_ok and vim.api.nvim_win_get_config(M.sidebar_win) or { relative = "" }
-    vim.api.nvim_win_close(M.buffers_win, true)
-    if cfg.relative ~= "" and float_tree_height and tree_ok and vim.api.nvim_win_is_valid(M.sidebar_win) then
+    -- Sidebar may already be gone (WinClosed); closing the last window is E444.
+    pcall(vim.api.nvim_win_close, M.buffers_win, true)
+    if cfg.relative ~= "" and float_tree_height and tree_ok
+        and M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win) then
       local tcfg = vim.api.nvim_win_get_config(M.sidebar_win)
       vim.api.nvim_win_set_config(M.sidebar_win, {
         relative = tcfg.relative,
@@ -275,7 +277,7 @@ function M.close_buffers_window()
         border   = tcfg.border,
         zindex   = tcfg.zindex,
       })
-    elseif vim.api.nvim_win_is_valid(M.sidebar_win) then
+    elseif M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win) then
       vim.wo[M.sidebar_win].winfixheight = true
     end
   end
