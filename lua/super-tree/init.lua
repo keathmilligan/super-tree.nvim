@@ -50,6 +50,10 @@ local config = {
     enable = true,
     -- Two-line layout for git workspaces in the tree (name, then branch/status).
     multiline = true,
+    -- Max concurrent background `git` OS processes. Status, numstat, and
+    -- stash share this pool so a folder of many repos cannot fork unbounded
+    -- jobs. Raise if refreshes feel serialized; keep modest on large trees.
+    max_jobs = 4,
     status = {
       enable = true,  -- git status symbols, branch names, repo summaries
       show_remote = false,  -- show upstream ref next to the branch name
@@ -95,11 +99,26 @@ local function rebuild()
   render_buffers()
 end
 
--- Wire git module to rebuild on async change events (a status change can
--- affect gitignore filtering, not just decorations).
-git.set_on_change(function()
+-- Re-render decorations without rescanning directories or touching
+-- watchers. Used when git status arrives and gitignore filtering is off.
+local function rerender()
   if window.is_open() then
+    tree.render(window.sidebar_buf, config)
+  end
+  render_buffers()
+end
+
+-- Wire git module to async change events. A status change only needs a
+-- full rebuild when hide_gitignored is active (the visible set may change);
+-- otherwise re-render decorations in place so a burst of repo completions
+-- cannot rescan the tree or re-queue every git job.
+git.set_on_change(function()
+  if not window.is_open() then return end
+  local hide_ignored = config.filtered_items and config.filtered_items.hide_gitignored
+  if hide_ignored and not tree.show_hidden then
     rebuild()
+  else
+    rerender()
   end
 end)
 
@@ -277,6 +296,7 @@ local function sidebar_actions()
       rebuild()
     end,
     refresh = function()
+      git.clear_negative_cache()
       rebuild()
       git.refresh_all()
     end,
@@ -607,6 +627,7 @@ function M.setup(opts)
   -- Propagate git status control to the git module and refresh status when
   -- files are written, even if they live outside the visible tree.
   git.status_enabled = config.git.enable and config.git.status.enable
+  git.max_jobs = math.max(1, tonumber(config.git.max_jobs) or 4)
   diagnostics.enabled = config.diagnostics.enable ~= false
 
   vim.api.nvim_create_autocmd("BufWritePost", {

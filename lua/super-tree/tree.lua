@@ -60,6 +60,11 @@ end
 -- Directory scanning
 -- ---------------------------------------------------------------------------
 
+-- Only the cwd and currently expanded directories are scanned (collapsed
+-- trees are not walked), so a large repository stays cheap until the user
+-- opens a folder. `vim.loop.fs_scandir` streams entries without a full
+-- readdir up front.
+
 local function scan_directory(path, depth, config)
   local entries = {}
   local handle = vim.loop.fs_scandir(path)
@@ -186,10 +191,6 @@ function M.build_tree(config)
     return
   end
 
-  if config.git and config.git.enable then
-    git.stop_watchers()
-  end
-
   M.tree_data = {}
   local cwd = vim.fn.getcwd()
   -- Root label: full path with ~ substitution, as neo-tree does.
@@ -218,15 +219,18 @@ function M.build_tree(config)
       end
     end
 
+    -- Incremental: keep existing watches, drop dirs that left the tree.
     git.start_watchers(dir_paths)
 
+    -- Probe only paths not yet in the cache. Known git repos are NOT
+    -- re-requested here — rebuilds (expand/collapse, gitignore filter)
+    -- must not stampede `git` across every visible repository. Status
+    -- refreshes come from watchers, BufWritePost, detect of new roots,
+    -- and the explicit refresh action.
     for _, path in ipairs(dir_paths) do
       if not git.git_roots[path] then
         local p = path
         vim.schedule(function() git.detect_and_cache(p) end)
-      elseif git.git_roots[path].is_git then
-        -- Known repo: kick a debounced background status refresh.
-        git.request_status(path)
       end
     end
   end

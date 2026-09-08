@@ -3,7 +3,8 @@
 --
 -- Repo detection: consumers call M.detect_and_cache(path) to populate
 -- M.git_roots, and call M.start_watchers / M.stop_watchers to manage
--- fs_event handles for visible directories.
+-- fs_event handles for visible directories. Negative (non-git) results are
+-- cached so a tree of many folders is not re-probed on every rebuild.
 --
 -- Git status: every detected repo root gets an async, debounced
 -- `git status --porcelain=v2 -z --branch` run whose parsed result is cached
@@ -13,8 +14,20 @@
 -- repo's git dir refreshes status in the background after commits, staging,
 -- branch switches, etc.
 --
+-- Concurrency: all `git` OS processes share a global job pool (M.max_jobs)
+-- so a directory of many repositories cannot spawn unbounded processes.
+-- Per-repo debounce still coalesces bursts; a follow-up run is queued if a
+-- refresh arrives while that repo is in flight. Long-running git commands
+-- are killed after GIT_TIMEOUT_MS so a huge worktree cannot stall the pool.
+--
+-- Watchers: worktree fs_event handles track currently visible directories
+-- (capped) and are updated incrementally — collapsing a folder drops its
+-- watch instead of tearing everything down. Git-dir watches are similarly
+-- capped and dropped when the repo leaves the visible set.
+--
 -- A `on_change` callback is injected via M.set_on_change so that async
--- callbacks can trigger a re-render without a circular dependency.
+-- callbacks can trigger a re-render without a circular dependency. Rapid
+-- completions coalesce into a single callback via a pending flag.
 
 local M = {}
 
@@ -36,6 +49,18 @@ M.repo_status = {}
 -- Toggled from init.setup based on config.git.status.enable.
 M.status_enabled = true
 
+-- Max concurrent `git` OS processes. Status, numstat, and stash share this
+-- pool. Set from config.git.max_jobs.
+M.max_jobs = 4
+
+-- Visible worktree directories watched for edits / new .git dirs.
+local MAX_FS_WATCHERS = 100
+-- Per-repo .git directory watches (commits, staging, branch switches).
+local MAX_GIT_DIR_WATCHERS = 50
+-- Kill a git process that runs longer than this so a huge repo cannot
+-- occupy a job-pool slot indefinitely.
+local GIT_TIMEOUT_MS = 15000
+
 -- path -> uv_fs_event handle (visible directory watchers)
 local fs_watchers = {}
 
@@ -49,6 +74,16 @@ local raw_status_cache = {}
 local status_timers  = {}  -- root -> uv_timer (scheduled run)
 local status_running = {}  -- root -> true while a git process is running
 local status_rerun   = {}  -- root -> true if a refresh arrived mid-run
+
+-- Global git process pool
+local job_queue     = {}  -- { { args, callback }, ... }
+local jobs_running  = 0
+
+-- In-flight detect_and_cache so a rebuild cannot stack probes on one path.
+local detect_inflight = {}
+
+-- Coalesce bursty status completions into one on_change.
+local notify_pending = false
 
 -- False after M.reset() until watchers are started again. Async callbacks
 -- scheduled before a reset must not re-create handles afterwards, otherwise
@@ -65,8 +100,11 @@ end
 local is_windows = vim.fn.has("win32") == 1
 
 local function notify_change()
+  if notify_pending then return end
+  notify_pending = true
   vim.schedule(function()
-    if on_change then on_change() end
+    notify_pending = false
+    if active and on_change then on_change() end
   end)
 end
 
@@ -153,15 +191,33 @@ local function detect_github(path, callback)
   end)
 end
 
+-- Drop cached "not a repo" results so the next build re-probes. Used by
+-- a manual refresh to pick up newly initialized repositories.
+function M.clear_negative_cache()
+  for path, info in pairs(M.git_roots) do
+    if not info.is_git then
+      M.git_roots[path] = nil
+    end
+  end
+end
+
 -- Detect git root and GitHub status for path; update git_roots and call
 -- on_change() if the result differs from the cached value. When a repo is
 -- found, a background status run and git-dir watcher are kicked off.
+-- Non-git paths are cached as negatives so they are not re-probed until
+-- a watcher sees a `.git` change or the negative cache is cleared.
 function M.detect_and_cache(path)
   if not active then return end
+  if detect_inflight[path] then return end
+  detect_inflight[path] = true
   detect_git_root(path, function(is_git)
+    detect_inflight[path] = nil
+    if not active then return end
     if not is_git then
       local prev = M.git_roots[path]
-      if prev and prev.is_git then
+      if not prev then
+        M.git_roots[path] = { is_git = false, is_github = false }
+      elseif prev.is_git then
         M.git_roots[path] = { is_git = false, is_github = false }
         M.repo_status[path] = nil
         raw_status_cache[path] = nil
@@ -171,6 +227,7 @@ function M.detect_and_cache(path)
     end
 
     detect_github(path, function(is_github)
+      if not active then return end
       local prev = M.git_roots[path]
       local changed = not prev or prev.is_git ~= true or prev.is_github ~= is_github
       M.git_roots[path] = { is_git = true, is_github = is_github }
@@ -351,31 +408,52 @@ M._parse_status_output = parse_status_output
 -- Async status runs
 -- ---------------------------------------------------------------------------
 
--- Spawn git with `args`, collect stdout, call callback(exit_code, output).
--- Pure libuv so it works from luv callbacks and on Neovim 0.8+.
-local function run_git(args, callback)
+-- Spawn a single git process. Returns true if the process started; on
+-- failure the callback is NOT invoked (the job pool handles that).
+local function spawn_git(args, callback)
   local stdout = vim.loop.new_pipe(false)
   local stderr = vim.loop.new_pipe(false)
+  if not stdout or not stderr then
+    if stdout then stdout:close() end
+    if stderr then stderr:close() end
+    return false
+  end
+
   local chunks = {}
   local handle
-  handle = vim.loop.spawn("git", {
-    args  = args,
-    stdio = { nil, stdout, stderr },
-    hide  = true,
-  }, function(code)
+  local done = false
+  local timeout_timer
+
+  local function finish(code)
+    if done then return end
+    done = true
+    if timeout_timer then
+      if not timeout_timer:is_closing() then
+        timeout_timer:stop()
+        timeout_timer:close()
+      end
+      timeout_timer = nil
+    end
     stdout:read_stop()
     stderr:read_stop()
     if not stdout:is_closing() then stdout:close() end
     if not stderr:is_closing() then stderr:close() end
     if handle and not handle:is_closing() then handle:close() end
     callback(code, table.concat(chunks))
+  end
+
+  handle = vim.loop.spawn("git", {
+    args  = args,
+    stdio = { nil, stdout, stderr },
+    hide  = true,
+  }, function(code)
+    finish(code)
   end)
 
   if not handle then
     stdout:close()
     stderr:close()
-    callback(-1, "")
-    return
+    return false
   end
 
   stdout:read_start(function(err, data)
@@ -384,6 +462,45 @@ local function run_git(args, callback)
     end
   end)
   stderr:read_start(function() end)
+
+  timeout_timer = vim.loop.new_timer()
+  if timeout_timer then
+    timeout_timer:start(GIT_TIMEOUT_MS, 0, function()
+      if handle and not handle:is_closing() then
+        handle:kill("sigterm")
+      end
+    end)
+  end
+  return true
+end
+
+local function pump_jobs()
+  while jobs_running < M.max_jobs and #job_queue > 0 do
+    local job = table.remove(job_queue, 1)
+    jobs_running = jobs_running + 1
+    local started = spawn_git(job.args, function(code, out)
+      jobs_running = jobs_running - 1
+      job.callback(code, out)
+      pump_jobs()
+    end)
+    if not started then
+      jobs_running = jobs_running - 1
+      -- Defer so a synchronous spawn failure cannot re-enter pump_jobs
+      -- via the callback (which may queue another run).
+      vim.schedule(function()
+        job.callback(-1, "")
+        pump_jobs()
+      end)
+    end
+  end
+end
+
+-- Queue git with `args`, collect stdout, call callback(exit_code, output).
+-- Pure libuv so it works from luv callbacks and on Neovim 0.8+. All spawns
+-- share the global job pool so many repos cannot fork unbounded processes.
+local function run_git(args, callback)
+  job_queue[#job_queue + 1] = { args = args, callback = callback }
+  pump_jobs()
 end
 
 -- Sum the added/removed line counts of `git diff --numstat` output.
@@ -406,55 +523,20 @@ local function git_flags(root)
   }
 end
 
--- Run git status (plus line diffstat and stash count) for a repo root and
--- update M.repo_status. The three git processes run concurrently.
+-- Run git status for a repo root, then numstat and stash. Status runs
+-- first so many repositories share the job pool fairly (one slot each)
+-- and the tree can show branch/symbols without waiting on diffstat. The
+-- two extras then share remaining slots and update line counts / stash.
 local function run_status(root)
+  if not active then return end
   status_running[root] = true
 
-  local results = {}
-  local pending = 3
-
-  local function collect(key)
-    return function(code, out)
-      results[key] = { code = code, out = out }
-      pending = pending - 1
-      if pending > 0 then return end
-
-      status_running[root] = nil
-      if status_rerun[root] then
-        status_rerun[root] = nil
-        M.request_status(root)
-      end
-
-      if results.status.code ~= 0 then
-        if M.repo_status[root] then
-          M.repo_status[root] = nil
-          raw_status_cache[root] = nil
-          notify_change()
-        end
-        return
-      end
-
-      -- Skip reparse/redraw when all outputs are byte-identical. The
-      -- numstat output participates because line counts can change while
-      -- the porcelain status stays the same.
-      local raw = results.status.out .. "\1"
-        .. (results.numstat.out or "") .. "\1"
-        .. (results.stash.out or "")
-      if raw_status_cache[root] == raw and M.repo_status[root] then
-        return
-      end
-      raw_status_cache[root] = raw
-
-      local st = parse_status_output(root, results.status.out)
-      if results.numstat.code == 0 then
-        st.diff_added, st.diff_removed = parse_numstat(results.numstat.out)
-      end
-      if results.stash.code == 0 then
-        st.stash = tonumber((results.stash.out or ""):match("%d+")) or 0
-      end
-      M.repo_status[root] = st
-      notify_change()
+  local function finish_run()
+    status_running[root] = nil
+    if not active then return end
+    if status_rerun[root] then
+      status_rerun[root] = nil
+      M.request_status(root)
     end
   end
 
@@ -471,16 +553,90 @@ local function run_status(root)
     "rev-list", "--walk-reflogs", "--count", "refs/stash",
   })
 
-  run_git(status_args,  collect("status"))
-  run_git(numstat_args, collect("numstat"))
-  run_git(stash_args,   collect("stash"))
+  run_git(status_args, function(code, out)
+    if not active then
+      finish_run()
+      return
+    end
+    if code ~= 0 then
+      if M.repo_status[root] then
+        M.repo_status[root] = nil
+        raw_status_cache[root] = nil
+        notify_change()
+      end
+      finish_run()
+      return
+    end
+
+    local st = parse_status_output(root, out)
+    local prev = M.repo_status[root]
+    if prev then
+      st.diff_added   = prev.diff_added
+      st.diff_removed = prev.diff_removed
+      st.stash        = prev.stash
+    end
+    M.repo_status[root] = st
+    local cached = raw_status_cache[root]
+    if not cached or cached:sub(1, #out + 1) ~= (out .. "\1") then
+      notify_change()
+    end
+
+    local extra = {}
+    local pending = 2
+    local function collect_extra(key)
+      return function(ecode, eout)
+        extra[key] = { code = ecode, out = eout }
+        pending = pending - 1
+        if pending > 0 then return end
+        if not active then
+          finish_run()
+          return
+        end
+        if extra.numstat.code == 0 then
+          st.diff_added, st.diff_removed = parse_numstat(extra.numstat.out)
+        end
+        if extra.stash.code == 0 then
+          st.stash = tonumber((extra.stash.out or ""):match("%d+")) or 0
+        end
+        local raw = out .. "\1"
+          .. (extra.numstat.out or "") .. "\1"
+          .. (extra.stash.out or "")
+        if raw_status_cache[root] ~= raw then
+          raw_status_cache[root] = raw
+          M.repo_status[root] = st
+          notify_change()
+        end
+        finish_run()
+      end
+    end
+
+    run_git(numstat_args, collect_extra("numstat"))
+    run_git(stash_args,   collect_extra("stash"))
+  end)
+end
+
+local function git_dir_watcher_count()
+  local n = 0
+  for _ in pairs(git_dir_watchers) do
+    n = n + 1
+  end
+  return n
+end
+
+local function close_watcher(handle)
+  if type(handle) ~= "boolean" and handle and not handle:is_closing() then
+    handle:stop()
+    handle:close()
+  end
 end
 
 -- Watch the repo's git dir so commits, staging, and branch switches refresh
--- the status in the background. Lock files are ignored.
+-- the status in the background. Lock files are ignored. Capped so a folder
+-- of many repos cannot exhaust inotify watches.
 local function watch_git_dir(root)
   if not active then return end
   if git_dir_watchers[root] then return end
+  if git_dir_watcher_count() >= MAX_GIT_DIR_WATCHERS then return end
   git_dir_watchers[root] = true  -- reserve while async setup runs
 
   resolve_git_dir(root, function(git_dir)
@@ -531,7 +687,9 @@ function M.request_status(root)
     timer:stop()
     timer:close()
     status_timers[root] = nil
-    run_status(root)
+    if active then
+      run_status(root)
+    end
   end)
 end
 
@@ -541,50 +699,74 @@ end
 
 function M.stop_watchers()
   for _, handle in pairs(fs_watchers) do
-    if handle and not handle:is_closing() then
-      handle:stop()
-      handle:close()
-    end
+    close_watcher(handle)
   end
   fs_watchers = {}
 end
 
 local function stop_git_dir_watchers()
   for _, handle in pairs(git_dir_watchers) do
-    if type(handle) ~= "boolean" and not handle:is_closing() then
-      handle:stop()
-      handle:close()
-    end
+    close_watcher(handle)
   end
   git_dir_watchers = {}
 end
 
--- Register fs_event watchers for up to 100 unique directory paths.
+local function start_fs_watcher(path)
+  local handle = vim.loop.new_fs_event()
+  if not handle then return false end
+  local ok = handle:start(path, {}, function(err, name, _events)
+    if err then return end
+    -- On Windows name may be nil; treat any change as potential .git event.
+    local is_git_change = (name == ".git") or (is_windows and name == nil)
+    if is_git_change then
+      M.detect_and_cache(path)
+    end
+    -- Any change in a watched directory may affect git status of
+    -- the repo that owns it; request a debounced refresh.
+    M.refresh_path(path)
+  end)
+  if ok then
+    fs_watchers[path] = handle
+    return true
+  end
+  handle:close()
+  return false
+end
+
+-- Sync fs_event watchers to the currently visible directory set.
+-- Existing handles are kept; paths that left the tree are dropped; new
+-- paths are added until MAX_FS_WATCHERS. Git-dir watches for repos that
+-- are no longer visible are dropped the same way.
 function M.start_watchers(paths)
   active = true
-  local count = 0
+  local desired = {}
   for _, path in ipairs(paths) do
+    desired[path] = true
+  end
+
+  for path, handle in pairs(fs_watchers) do
+    if not desired[path] then
+      close_watcher(handle)
+      fs_watchers[path] = nil
+    end
+  end
+
+  for root, handle in pairs(git_dir_watchers) do
+    if not desired[root] then
+      close_watcher(handle)
+      git_dir_watchers[root] = nil
+    end
+  end
+
+  local count = 0
+  for _ in pairs(fs_watchers) do
+    count = count + 1
+  end
+  for _, path in ipairs(paths) do
+    if count >= MAX_FS_WATCHERS then break end
     if not fs_watchers[path] then
-      if count >= 100 then break end
-      local handle = vim.loop.new_fs_event()
-      if handle then
-        local ok = handle:start(path, {}, function(err, name, _events)
-          if err then return end
-          -- On Windows name may be nil; treat any change as potential .git event.
-          local is_git_change = (name == ".git") or (is_windows and name == nil)
-          if is_git_change then
-            M.detect_and_cache(path)
-          end
-          -- Any change in a watched directory may affect git status of
-          -- the repo that owns it; request a debounced refresh.
-          M.refresh_path(path)
-        end)
-        if ok then
-          fs_watchers[path] = handle
-          count = count + 1
-        else
-          handle:close()
-        end
+      if start_fs_watcher(path) then
+        count = count + 1
       end
     end
   end
@@ -593,6 +775,9 @@ end
 -- Reset all cached git state (call when the sidebar is closed).
 function M.reset()
   active = false
+  job_queue        = {}
+  detect_inflight  = {}
+  notify_pending   = false
   M.stop_watchers()
   stop_git_dir_watchers()
   for _, timer in pairs(status_timers) do

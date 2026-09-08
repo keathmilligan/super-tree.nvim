@@ -135,6 +135,7 @@ require("super-tree").setup({
   git = {
     enable = true,
     multiline = true, -- two-line layout for git workspaces in the tree
+    max_jobs = 4, -- concurrent background `git` processes (shared pool)
     status = {
       enable = true,
       show_remote = false, -- upstream ref next to the branch name
@@ -175,7 +176,7 @@ Right-aligned virtual text in muted colors:
 - **Directories**: highest-priority child status (conflict > untracked > modified > added > deleted > renamed)
 - **Repos** (`git.multiline = true`, default): two lines like the cwd root — name on the first, branch/ahead/behind/stash on the left of the second, line diffstat and change breakdowns on the right. Set `multiline = false` for a single-line compact summary. Set `git.status.show_remote = true` to include the upstream ref next to the branch.
 
-Refreshed in the background from directory watchers, git-dir watchers, and `BufWritePost`.
+Refreshed in the background from directory watchers, git-dir watchers, and `BufWritePost`. Git processes share a pool (`git.max_jobs`, default 4) so a folder of many repositories cannot spawn unbounded jobs; a 15s timeout keeps a huge worktree from stalling the pool. Only expanded directories are scanned, and filesystem watches are updated incrementally (capped) rather than torn down on every refresh.
 
 ### Appearance
 
