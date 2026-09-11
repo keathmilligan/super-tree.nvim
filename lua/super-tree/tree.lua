@@ -209,19 +209,21 @@ function M.build_tree(config)
 
   add_entries(entries)
 
-  if config.git and config.git.enable then
-    local dir_paths = { cwd }
-    local seen = { [cwd] = true }
-    for _, entry in ipairs(M.tree_data) do
-      if entry.is_dir and not seen[entry.path] then
-        table.insert(dir_paths, entry.path)
-        seen[entry.path] = true
-      end
+  local dir_paths = { cwd }
+  local seen = { [cwd] = true }
+  for _, entry in ipairs(M.tree_data) do
+    if entry.is_dir and not seen[entry.path] then
+      table.insert(dir_paths, entry.path)
+      seen[entry.path] = true
     end
+  end
 
-    -- Incremental: keep existing watches, drop dirs that left the tree.
-    git.start_watchers(dir_paths)
+  -- Incremental: keep existing watches, drop dirs that left the tree.
+  -- Watchers run even when git is disabled so the listing tracks
+  -- creates/deletes/renames on disk.
+  git.start_watchers(dir_paths)
 
+  if config.git and config.git.enable then
     -- Probe only paths not yet in the cache. Known git repos are NOT
     -- re-requested here — rebuilds (expand/collapse, gitignore filter)
     -- must not stampede `git` across every visible repository. Status

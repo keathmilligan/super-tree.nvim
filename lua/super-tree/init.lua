@@ -122,6 +122,14 @@ git.set_on_change(function()
   end
 end)
 
+-- Worktree create/delete/rename: rescan directories. Distinct from
+-- git.set_on_change, which only refreshes decorations unless gitignore
+-- filtering can hide or reveal entries.
+git.set_on_fs_change(function()
+  if not window.is_open() then return end
+  rebuild()
+end)
+
 -- ---------------------------------------------------------------------------
 -- Navigation actions (used by keymaps)
 -- ---------------------------------------------------------------------------

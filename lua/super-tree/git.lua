@@ -23,11 +23,15 @@
 -- Watchers: worktree fs_event handles track currently visible directories
 -- (capped) and are updated incrementally — collapsing a folder drops its
 -- watch instead of tearing everything down. Git-dir watches are similarly
--- capped and dropped when the repo leaves the visible set.
+-- capped and dropped when the repo leaves the visible set. Worktree events
+-- also notify `on_fs_change` so the tree can rescan (add/delete/rename);
+-- git-dir events only refresh status decorations.
 --
 -- A `on_change` callback is injected via M.set_on_change so that async
--- callbacks can trigger a re-render without a circular dependency. Rapid
--- completions coalesce into a single callback via a pending flag.
+-- git-status completions can trigger a re-render without a circular
+-- dependency. Rapid completions coalesce into a single callback via a
+-- pending flag. `on_fs_change` is a separate debounced callback for
+-- worktree membership changes.
 
 local M = {}
 
@@ -60,6 +64,9 @@ local MAX_GIT_DIR_WATCHERS = 50
 -- Kill a git process that runs longer than this so a huge repo cannot
 -- occupy a job-pool slot indefinitely.
 local GIT_TIMEOUT_MS = 15000
+-- Coalesce bursty worktree events (git checkout, rm -r, editor atomic
+-- saves) into one tree rescan.
+local FS_DEBOUNCE_MS = 200
 
 -- path -> uv_fs_event handle (visible directory watchers)
 local fs_watchers = {}
@@ -85,6 +92,9 @@ local detect_inflight = {}
 -- Coalesce bursty status completions into one on_change.
 local notify_pending = false
 
+-- Debounce timer for worktree membership changes (add/delete/rename).
+local fs_notify_timer = nil
+
 -- False after M.reset() until watchers are started again. Async callbacks
 -- scheduled before a reset must not re-create handles afterwards, otherwise
 -- watchers and timers leak past sidebar close.
@@ -93,8 +103,16 @@ local active = false
 -- Called when a git state change is detected; injected by the caller.
 local on_change = nil
 
+-- Called when a watched worktree directory changes; injected by the caller
+-- so the tree can rescan without a circular dependency.
+local on_fs_change = nil
+
 function M.set_on_change(fn)
   on_change = fn
+end
+
+function M.set_on_fs_change(fn)
+  on_fs_change = fn
 end
 
 local is_windows = vim.fn.has("win32") == 1
@@ -105,6 +123,35 @@ local function notify_change()
   vim.schedule(function()
     notify_pending = false
     if active and on_change then on_change() end
+  end)
+end
+
+local function close_timer(timer)
+  if timer and not timer:is_closing() then
+    timer:stop()
+    timer:close()
+  end
+end
+
+local function notify_fs_change()
+  if not active then return end
+  -- Trailing debounce: fire once after the burst (checkout, rm -r) settles.
+  close_timer(fs_notify_timer)
+  fs_notify_timer = nil
+  local timer = vim.loop.new_timer()
+  if not timer then
+    vim.schedule(function()
+      if active and on_fs_change then on_fs_change() end
+    end)
+    return
+  end
+  fs_notify_timer = timer
+  timer:start(FS_DEBOUNCE_MS, 0, function()
+    close_timer(timer)
+    fs_notify_timer = nil
+    vim.schedule(function()
+      if active and on_fs_change then on_fs_change() end
+    end)
   end)
 end
 
@@ -724,6 +771,9 @@ local function start_fs_watcher(path)
     -- Any change in a watched directory may affect git status of
     -- the repo that owns it; request a debounced refresh.
     M.refresh_path(path)
+    -- Rescan the tree so creates/deletes/renames show up. Git-status
+    -- on_change only re-renders decorations on the existing listing.
+    notify_fs_change()
   end)
   if ok then
     fs_watchers[path] = handle
@@ -778,6 +828,8 @@ function M.reset()
   job_queue        = {}
   detect_inflight  = {}
   notify_pending   = false
+  close_timer(fs_notify_timer)
+  fs_notify_timer  = nil
   M.stop_watchers()
   stop_git_dir_watchers()
   for _, timer in pairs(status_timers) do
