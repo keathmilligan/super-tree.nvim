@@ -470,9 +470,15 @@ local function spawn_git(args, callback)
   local handle
   local done = false
   local timeout_timer
+  local exit_code
+  local stdout_done = false
+  local stderr_done = false
 
-  local function finish(code)
-    if done then return end
+  -- A process may exit before libuv has delivered the final pipe reads.
+  -- Wait for both streams to reach EOF or parsing can intermittently see
+  -- empty/truncated status output (and render the branch as "?").
+  local function finish()
+    if done or exit_code == nil or not stdout_done or not stderr_done then return end
     done = true
     if timeout_timer then
       if not timeout_timer:is_closing() then
@@ -486,7 +492,7 @@ local function spawn_git(args, callback)
     if not stdout:is_closing() then stdout:close() end
     if not stderr:is_closing() then stderr:close() end
     if handle and not handle:is_closing() then handle:close() end
-    callback(code, table.concat(chunks))
+    callback(exit_code, table.concat(chunks))
   end
 
   handle = vim.loop.spawn("git", {
@@ -494,7 +500,8 @@ local function spawn_git(args, callback)
     stdio = { nil, stdout, stderr },
     hide  = true,
   }, function(code)
-    finish(code)
+    exit_code = code
+    finish()
   end)
 
   if not handle then
@@ -507,8 +514,17 @@ local function spawn_git(args, callback)
     if not err and data then
       chunks[#chunks + 1] = data
     end
+    if err or not data then
+      stdout_done = true
+      finish()
+    end
   end)
-  stderr:read_start(function() end)
+  stderr:read_start(function(err, data)
+    if err or not data then
+      stderr_done = true
+      finish()
+    end
+  end)
 
   timeout_timer = vim.loop.new_timer()
   if timeout_timer then

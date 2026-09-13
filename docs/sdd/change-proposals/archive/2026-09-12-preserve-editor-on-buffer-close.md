@@ -1,16 +1,16 @@
 ---
 id: preserve-editor-on-buffer-close
-status: review
+status: accepted
 features: [window]
 created: 2026-09-06
-updated: 2026-09-06
+updated: 2026-09-12
 ---
 
 # Preserve an editor window when a buffer is closed
 
 | Created | Updated |
 | --- | --- |
-| 2026-09-06 | 2026-09-06 |
+| 2026-09-06 | 2026-09-12 |
 
 ## What
 
@@ -50,7 +50,7 @@ Builtin `:bdelete` cannot be hooked before it closes windows. Combine three know
 2. **Layout invariant** after any window close: if SuperTree is still open as a split and no editor window remains (and Neovim is not exiting), create one.
 3. **Safe close / safe open**: never `nvim_win_close` the last window; when creating an editor beside a full-width tree, use a full-height split and reset sidebar width.
 
-Details and event ordering: [design/preserve-editor-on-buffer-close.md](../design/preserve-editor-on-buffer-close.md).
+Details and event ordering: [design/preserve-editor-on-buffer-close.md](../../design/preserve-editor-on-buffer-close.md).
 
 ### Impacted specifications
 
@@ -83,3 +83,4 @@ Details and event ordering: [design/preserve-editor-on-buffer-close.md](../desig
 | --- | --- |
 | 2026-09-06 | Initial proposal |
 | 2026-09-06 | Implemented; ready for review |
+| 2026-09-12 | Accepted; `window` spec created |
