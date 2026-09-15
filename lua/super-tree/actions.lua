@@ -299,8 +299,8 @@ end
 
 local HELP_ENTRIES = {
   { "j / k / arrows", "move up / down" },
-  { "<CR>",           "toggle directory / open file" },
-  { "<2-LeftMouse>",  "toggle directory / open file" },
+  { "<CR>",           "toggle directory / open file / switch project" },
+  { "<2-LeftMouse>",  "toggle directory / open file / switch project" },
   { "l / <Right>",    "expand directory / open file" },
   { "h / <Left>",     "collapse directory / go to parent" },
   { "S",              "open in horizontal split" },
@@ -327,7 +327,7 @@ local HELP_ENTRIES = {
   { "f",              "filter on submit" },
   { "<C-x>",          "clear filter" },
   { "B",              "toggle buffers pane" },
-  { "R",              "refresh tree and git status" },
+  { "R",              "refresh projects, tree and git status" },
   { "?",              "this help" },
   { "q / <Esc>",      "close (<Esc> not in sidebar mode)" },
 }

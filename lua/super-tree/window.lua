@@ -6,12 +6,13 @@ local M = {}
 
 M.sidebar_buf = nil
 M.sidebar_win = nil
-M.sidebar_width = 50
+M.sidebar_width = 40
 M.buffers_buf = nil
 M.buffers_win = nil
 M.buffers_visible = false
--- Original float height of the tree window, restored when the buffers pane closes.
-local float_tree_height = nil
+M.projects_buf = nil
+M.projects_win = nil
+local pane_heights = { buffers = 10, projects = 10 }
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -134,9 +135,9 @@ local WINHIGHLIGHT = table.concat({
 }, ",")
 
 function M.create_floating_window(buf, width)
-  M.sidebar_width = width
-  local tabline_height = get_tabline_height()
-  local win_config = {
+  M.sidebar_width            = width
+  local tabline_height       = get_tabline_height()
+  local win_config           = {
     relative = "editor",
     width    = width,
     height   = vim.o.lines - vim.o.cmdheight - tabline_height - 1,
@@ -148,7 +149,7 @@ function M.create_floating_window(buf, width)
     zindex   = 40,
   }
 
-  local win = vim.api.nvim_open_win(buf, true, win_config)
+  local win                  = vim.api.nvim_open_win(buf, true, win_config)
 
   vim.wo[win].number         = false
   vim.wo[win].relativenumber = false
@@ -168,7 +169,7 @@ function M.create_floating_window(buf, width)
 end
 
 local function apply_win_opts(win, opts)
-  opts = opts or {}
+  opts                       = opts or {}
   vim.wo[win].number         = false
   vim.wo[win].relativenumber = false
   vim.wo[win].signcolumn     = "no"
@@ -190,100 +191,143 @@ local function apply_win_opts(win, opts)
   end
 end
 
-function M.create_or_get_buffers_buffer()
-  if M.buffers_buf and vim.api.nvim_buf_is_valid(M.buffers_buf) then
-    return M.buffers_buf
+local function create_pane_buffer(pane)
+  local key = pane .. "_buf"
+  if M[key] and vim.api.nvim_buf_is_valid(M[key]) then
+    return M[key]
   end
-  M.buffers_buf = vim.api.nvim_create_buf(false, true)
-  configure_scratch(M.buffers_buf, "SuperTree://buffers")
-  return M.buffers_buf
+  M[key] = vim.api.nvim_create_buf(false, true)
+  configure_scratch(M[key], "SuperTree://" .. pane)
+  return M[key]
 end
 
--- Open the buffers pane above the tree window. Independently scrollable
--- and resizable (`<C-w>+/-` or mouse drag on the split).
-function M.open_buffers_window(height)
-  if not M.is_open() then return nil end
-  if M.buffers_win and vim.api.nvim_win_is_valid(M.buffers_win) then
-    return M.buffers_buf
+-- All floating panes share one column, in Projects / Buffers / Tree order.
+-- Recompute together so toggling either pane cannot overlap the other.
+function M.layout_floating_panes()
+  if not M.is_open() then return end
+  local cfg = vim.api.nvim_win_get_config(M.sidebar_win)
+  if cfg.relative == "" then return end
+  local panes = {}
+  for _, pane in ipairs({ "projects", "buffers" }) do
+    local win = M[pane .. "_win"]
+    if win and vim.api.nvim_win_is_valid(win) then
+      panes[#panes + 1] = pane
+    end
   end
+  local row = get_tabline_height()
+  local total = math.max(#panes + 1, vim.o.lines - vim.o.cmdheight - row - 1)
+  local available = total - math.min(6, total - #panes)
+  local requested = 0
+  for _, pane in ipairs(panes) do requested = requested + pane_heights[pane] end
+  for i, pane in ipairs(panes) do
+    local height = math.min(pane_heights[pane], math.floor(available * pane_heights[pane] / requested))
+    height = math.min(height, available - (#panes - i))
+    height = math.max(1, height)
+    vim.api.nvim_win_set_config(M[pane .. "_win"], {
+      relative = "editor", row = row, col = cfg.col, width = cfg.width, height = height,
+    })
+    row = row + height
+    total = total - height
+    available = available - height
+    requested = requested - pane_heights[pane]
+  end
+  vim.api.nvim_win_set_config(M.sidebar_win, {
+    relative = "editor", row = row, col = cfg.col, width = cfg.width, height = total,
+  })
+end
 
-  local buf = M.create_or_get_buffers_buffer()
-  height = math.max(tonumber(height) or 8, 3)
+-- Panes are real, independently scrollable/resizable windows in split modes.
+local function open_pane(pane, height, title)
+  if not M.is_open() then return nil end
+  local key = pane .. "_win"
+  if M[key] and vim.api.nvim_win_is_valid(M[key]) then return M[pane .. "_buf"] end
+  local buf = create_pane_buffer(pane)
+  height = math.max(tonumber(height) or pane_heights[pane], 3)
+  pane_heights[pane] = height
   local cfg = vim.api.nvim_win_get_config(M.sidebar_win)
 
   if cfg.relative ~= "" then
-    local tree_h = cfg.height
-    local buf_h = math.min(height, math.max(tree_h - 6, 3))
-    float_tree_height = tree_h
-    local row = cfg.row
-    local col = cfg.col
-    vim.api.nvim_win_set_config(M.sidebar_win, {
-      relative = cfg.relative,
-      width    = cfg.width,
-      height   = tree_h - buf_h,
-      col      = col,
-      row      = row + buf_h,
-      anchor   = cfg.anchor,
-      style    = cfg.style,
-      border   = cfg.border,
-      zindex   = cfg.zindex,
-    })
-    M.buffers_win = vim.api.nvim_open_win(buf, false, {
+    M[key] = vim.api.nvim_open_win(buf, false, {
       relative = "editor",
       width    = cfg.width,
-      height   = buf_h,
-      col      = col,
-      row      = row,
+      height   = 1,
+      col      = cfg.col,
+      row      = cfg.row,
       anchor   = "NW",
       style    = "minimal",
       border   = "none",
       zindex   = 40,
     })
-    apply_win_opts(M.buffers_win, { statusline = "" })
+    apply_win_opts(M[key], { statusline = "" })
+    M.layout_floating_panes()
   else
-    vim.api.nvim_set_current_win(M.sidebar_win)
+    local current = vim.api.nvim_get_current_win()
+    local sibling = pane == "projects" and M.buffers_win or M.projects_win
+    local sibling_height = sibling and vim.api.nvim_win_is_valid(sibling)
+        and vim.api.nvim_win_get_height(sibling) or nil
+    local anchor = pane == "projects" and M.buffers_win or M.sidebar_win
+    if not anchor or not vim.api.nvim_win_is_valid(anchor) then anchor = M.sidebar_win end
+    vim.api.nvim_set_current_win(anchor)
     vim.cmd("aboveleft split")
-    M.buffers_win = vim.api.nvim_get_current_win()
-    vim.api.nvim_win_set_buf(M.buffers_win, buf)
-    vim.api.nvim_win_set_height(M.buffers_win, height)
-    apply_win_opts(M.buffers_win, { statusline = " Buffers", winfixwidth = true })
+    M[key] = vim.api.nvim_get_current_win()
+    vim.api.nvim_win_set_buf(M[key], buf)
+    vim.api.nvim_win_set_height(M[key], height)
+    apply_win_opts(M[key], { statusline = " " .. title, winfixwidth = true })
     vim.wo[M.sidebar_win].winfixheight = false
-    vim.wo[M.buffers_win].winfixheight = false
-    vim.api.nvim_set_current_win(M.sidebar_win)
+    if sibling_height then
+      -- :split can equalize the whole column. Keep the existing pane's
+      -- user-adjusted height, taking the new pane's space from the tree.
+      vim.wo[M[key]].winfixheight = true
+      vim.api.nvim_win_set_height(sibling, sibling_height)
+    end
+    vim.wo[M[key]].winfixheight = false
+    vim.api.nvim_set_current_win(current)
   end
 
-  M.guard_window(M.buffers_win, buf)
-  M.buffers_visible = true
+  M.guard_window(M[key], buf)
+  return buf
+end
+
+local function close_pane(pane)
+  local key = pane .. "_win"
+  local sibling = pane == "projects" and M.buffers_win or M.projects_win
+  local sibling_valid = sibling and vim.api.nvim_win_is_valid(sibling)
+  local fixed = sibling_valid and vim.wo[sibling].winfixheight
+  if sibling_valid then vim.wo[sibling].winfixheight = true end
+  if M[key] and vim.api.nvim_win_is_valid(M[key]) then
+    pcall(vim.api.nvim_win_close, M[key], true)
+  end
+  if sibling_valid and vim.api.nvim_win_is_valid(sibling) then
+    vim.wo[sibling].winfixheight = fixed
+  end
+  M[key] = nil
+  M.layout_floating_panes()
+  if M.is_open() then
+    vim.wo[M.sidebar_win].winfixheight = not (M.buffers_win or M.projects_win)
+  end
+end
+
+function M.open_buffers_window(height)
+  local buf = open_pane("buffers", height, "Buffers")
+  M.buffers_visible = buf ~= nil
   return buf
 end
 
 function M.close_buffers_window()
-  if M.buffers_win and vim.api.nvim_win_is_valid(M.buffers_win) then
-    local tree_ok = M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win)
-    local cfg = tree_ok and vim.api.nvim_win_get_config(M.sidebar_win) or { relative = "" }
-    -- Sidebar may already be gone (WinClosed); closing the last window is E444.
-    pcall(vim.api.nvim_win_close, M.buffers_win, true)
-    if cfg.relative ~= "" and float_tree_height and tree_ok
-        and M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win) then
-      local tcfg = vim.api.nvim_win_get_config(M.sidebar_win)
-      vim.api.nvim_win_set_config(M.sidebar_win, {
-        relative = tcfg.relative,
-        width    = tcfg.width,
-        height   = float_tree_height,
-        col      = tcfg.col,
-        row      = get_tabline_height(),
-        anchor   = tcfg.anchor,
-        style    = tcfg.style,
-        border   = tcfg.border,
-        zindex   = tcfg.zindex,
-      })
-    elseif M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win) then
-      vim.wo[M.sidebar_win].winfixheight = true
-    end
-  end
-  M.buffers_win = nil
+  close_pane("buffers")
   M.buffers_visible = false
-  float_tree_height = nil
+end
+
+function M.open_projects_window(height)
+  return open_pane("projects", height, "Projects")
+end
+
+function M.close_projects_window()
+  close_pane("projects")
+end
+
+function M.is_plugin_win(win)
+  return win ~= nil and (win == M.sidebar_win or win == M.buffers_win or win == M.projects_win)
 end
 
 function M.create_pinned_window(buf, width)
@@ -327,7 +371,7 @@ M.open_files_do_not_replace_types = { "terminal", "Trouble", "qf", "edgy" }
 -- Returns nil when none exists.
 function M.find_editor_win()
   local function usable(w)
-    if not w or w == 0 or w == M.sidebar_win or w == M.buffers_win then return false end
+    if not w or w == 0 or M.is_plugin_win(w) then return false end
     if not vim.api.nvim_win_is_valid(w) then return false end
     if vim.api.nvim_win_get_config(w).relative ~= "" then return false end
     local b = vim.api.nvim_win_get_buf(w)
@@ -383,7 +427,7 @@ function M.unshow_buffer(bufnr)
   if not bufnr or not vim.api.nvim_buf_is_valid(bufnr) then return end
   local replacement = M.find_replacement_buf(bufnr) or new_unnamed_buf()
   for _, win in ipairs(vim.fn.win_findbuf(bufnr)) do
-    if win ~= M.sidebar_win and win ~= M.buffers_win
+    if not M.is_plugin_win(win)
         and vim.api.nvim_win_is_valid(win)
         and vim.api.nvim_win_get_config(win).relative == "" then
       vim.api.nvim_win_set_buf(win, replacement)
@@ -494,46 +538,46 @@ function M.setup_keymaps(buf, actions, keymap_opts)
 
   local map = {
     -- navigation
-    ["<Up>"]    = actions.move_up,
-    ["<Down>"]  = actions.move_down,
-    ["<CR>"]           = actions.toggle_expand,
-    ["<2-LeftMouse>"]  = actions.toggle_expand,
-    ["l"]       = actions.expand_or_open,
-    ["<Right>"] = actions.expand_or_open,
-    ["h"]       = actions.collapse_or_parent,
-    ["<Left>"]  = actions.collapse_or_parent,
-    ["<Tab>"]   = actions.focus_editor,
-    ["z"]       = actions.close_all,
-    ["."]       = actions.set_root,
-    ["<BS>"]    = actions.root_up,
+    ["<Up>"]          = actions.move_up,
+    ["<Down>"]        = actions.move_down,
+    ["<CR>"]          = actions.toggle_expand,
+    ["<2-LeftMouse>"] = actions.toggle_expand,
+    ["l"]             = actions.expand_or_open,
+    ["<Right>"]       = actions.expand_or_open,
+    ["h"]             = actions.collapse_or_parent,
+    ["<Left>"]        = actions.collapse_or_parent,
+    ["<Tab>"]         = actions.focus_editor,
+    ["z"]             = actions.close_all,
+    ["."]             = actions.set_root,
+    ["<BS>"]          = actions.root_up,
     -- opening
-    ["S"] = actions.open_split,
-    ["s"] = actions.open_vsplit,
-    ["t"] = actions.open_tab,
+    ["S"]             = actions.open_split,
+    ["s"]             = actions.open_vsplit,
+    ["t"]             = actions.open_tab,
     -- file operations
-    ["a"] = actions.add,
-    ["A"] = actions.add_directory,
-    ["d"] = actions.delete,
-    ["r"] = actions.rename,
-    ["m"] = actions.move,
-    ["c"] = actions.copy,
-    ["y"] = actions.copy_to_clipboard,
-    ["x"] = actions.cut_to_clipboard,
-    ["p"] = actions.paste,
+    ["a"]             = actions.add,
+    ["A"]             = actions.add_directory,
+    ["d"]             = actions.delete,
+    ["r"]             = actions.rename,
+    ["m"]             = actions.move,
+    ["c"]             = actions.copy,
+    ["y"]             = actions.copy_to_clipboard,
+    ["x"]             = actions.cut_to_clipboard,
+    ["p"]             = actions.paste,
     -- view
-    ["H"] = actions.toggle_hidden,
-    ["R"] = actions.refresh,
-    ["?"] = actions.help,
+    ["H"]             = actions.toggle_hidden,
+    ["R"]             = actions.refresh,
+    ["?"]             = actions.help,
     -- filter
-    ["/"]     = actions.fuzzy_finder,
-    ["D"]     = actions.fuzzy_finder_directory,
-    ["#"]     = actions.fuzzy_sorter,
-    ["f"]     = actions.filter_on_submit,
-    ["<C-x>"] = actions.clear_filter,
-    ["B"]     = actions.toggle_buffers,
+    ["/"]             = actions.fuzzy_finder,
+    ["D"]             = actions.fuzzy_finder_directory,
+    ["#"]             = actions.fuzzy_sorter,
+    ["f"]             = actions.filter_on_submit,
+    ["<C-x>"]         = actions.clear_filter,
+    ["B"]             = actions.toggle_buffers,
     -- close
-    ["q"]     = actions.close,
-    ["<Esc>"] = (keymap_opts.esc_closes ~= false) and actions.close or nil,
+    ["q"]             = actions.close,
+    ["<Esc>"]         = (keymap_opts.esc_closes ~= false) and actions.close or nil,
   }
   for key, fn in pairs(map) do
     if fn then
@@ -551,6 +595,7 @@ function M.is_open()
 end
 
 function M.close_window()
+  M.close_projects_window()
   M.close_buffers_window()
   if not (M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win)) then
     return
@@ -564,6 +609,28 @@ function M.close_window()
   end
   pcall(vim.api.nvim_win_close, M.sidebar_win, true)
   M.sidebar_win = nil
+end
+
+function M.setup_projects_keymaps(buf, actions, keymap_opts)
+  keymap_opts = keymap_opts or {}
+  local opts = { buffer = buf, nowait = true, silent = true }
+  local map = {
+    ["<CR>"]          = actions.switch_project,
+    ["<2-LeftMouse>"] = actions.switch_project,
+    ["l"]             = actions.switch_project,
+    ["<Right>"]       = actions.switch_project,
+    ["h"]             = actions.buffers_collapse,
+    ["<Left>"]        = actions.buffers_collapse,
+    ["<Tab>"]         = actions.focus_editor,
+    ["B"]             = actions.toggle_buffers,
+    ["R"]             = actions.refresh,
+    ["?"]             = actions.help,
+    ["q"]             = actions.close,
+    ["<Esc>"]         = (keymap_opts.esc_closes ~= false) and actions.close or nil,
+  }
+  for key, fn in pairs(map) do
+    if fn then vim.keymap.set("n", key, fn, opts) end
+  end
 end
 
 function M.setup_buffers_keymaps(buf, actions, keymap_opts)

@@ -1,52 +1,58 @@
-local icons   = require("super-tree.icons")
-local git     = require("super-tree.git")
-local tree    = require("super-tree.tree")
-local window  = require("super-tree.window")
-local actions = require("super-tree.actions")
+local icons       = require("super-tree.icons")
+local git         = require("super-tree.git")
+local tree        = require("super-tree.tree")
+local window      = require("super-tree.window")
+local actions     = require("super-tree.actions")
 local filter      = require("super-tree.filter")
 local buffers     = require("super-tree.buffers")
+local projects    = require("super-tree.projects")
 local diagnostics = require("super-tree.diagnostics")
 
-local M = {}
+local M           = {}
 
-local config = {
-  width = 50,
+local config      = {
+  width                           = 40,
   -- "floating": overlay popup, closes when a file is opened
   -- "pinned":   vertical split, <Esc>/q close it
   -- "sidebar":  persistent vertical split like neo-tree - stays open when
   --             files are opened, never covers other windows, navigable
   --             like a regular window; only q closes it
-  mode  = "sidebar",
-  icons = {
+  mode                            = "sidebar",
+  icons                           = {
     enable   = true,
-    provider = "auto",  -- "auto", "nvim-web-devicons", or "builtin"
+    provider = "auto", -- "auto", "nvim-web-devicons", or "builtin"
   },
   -- Move the sidebar cursor to the current file on BufEnter.
-  follow_current_file = true,
+  follow_current_file             = true,
   -- When opening files, never replace windows with these filetypes or
   -- buftypes; any other window is reused (like neo-tree).
   open_files_do_not_replace_types = { "terminal", "Trouble", "qf", "edgy" },
   -- Entries hidden by default; toggle visibility with H.
-  filtered_items = {
+  filtered_items                  = {
     hide_dotfiles   = false,
     hide_gitignored = false,
   },
   -- Live filter / fuzzy finder (`/`, `D`, `#`, `f`).
-  filter = {
+  filter                          = {
     search_limit = 50,
     find_by_full_path_words = false,
   },
-  -- Open-buffers pane above the file tree (`B` to toggle).
-  buffers = {
+  -- Projects discovered by neovim-project, above the buffers pane.
+  projects                        = {
     enable = true,
-    height = 8,
+    height = 10,
   },
-  diagnostics = {
+  -- Open-buffers pane above the file tree (`B` to toggle).
+  buffers                         = {
+    enable = true,
+    height = 10,
+  },
+  diagnostics                     = {
     enable = true,
     -- nil: use gutter sign text (vim.diagnostic.config().signs), else E/W/I/H
     -- symbols = { error = "E", warn = "W", info = "I", hint = "H" },
   },
-  git = {
+  git                             = {
     enable = true,
     -- Two-line layout for git workspaces in the tree (name, then branch/status).
     multiline = true,
@@ -55,32 +61,34 @@ local config = {
     -- jobs. Raise if refreshes feel serialized; keep modest on large trees.
     max_jobs = 4,
     status = {
-      enable = true,  -- git status symbols, branch names, repo summaries
-      show_remote = false,  -- show upstream ref next to the branch name
+      enable = true,       -- git status symbols, branch names, repo summaries
+      show_remote = false, -- show upstream ref next to the branch name
       symbols = {
         -- Change type
-        added     = "",
-        deleted   = "",
-        modified  = "",
-        renamed   = "󰁕",
+        added         = "",
+        deleted       = "",
+        modified      = "",
+        renamed       = "󰁕",
         -- Status type
-        untracked = "",
-        ignored   = "",
-        staged    = "",
-        unstaged  = "󰄱",
-        conflict  = "",
+        untracked     = "",
+        ignored       = "",
+        staged        = "",
+        unstaged      = "󰄱",
+        conflict      = "",
         -- Repo summary
-        branch    = "",
-        ahead     = "",
-        behind    = "",
-        clean     = "",
-        stash     = "≡",
+        branch        = "",
+        ahead         = "",
+        behind        = "",
+        clean         = "",
+        stash         = "≡",
         lines_added   = "+",
         lines_removed = "-",
       },
     },
   },
 }
+
+local refresh_projects
 
 local function render_buffers()
   if window.buffers_visible and window.buffers_buf
@@ -260,7 +268,7 @@ local function root_up()
   local parent = cwd:match("^(.*)/[^/]+$")
   if not parent then return end
   if parent == "" then parent = "/" end
-  tree.expanded_paths[cwd] = true  -- keep the old root visible and open
+  tree.expanded_paths[cwd] = true -- keep the old root visible and open
   vim.cmd("cd " .. vim.fn.fnameescape(parent))
   rebuild()
 end
@@ -271,87 +279,116 @@ local function sidebar_actions()
   end
   return {
     -- navigation
-    move_up            = move_up,
-    move_down          = move_down,
-    toggle_expand      = toggle_expand,
-    expand_or_open     = expand_or_open,
-    collapse_or_parent = collapse_or_parent,
-    focus_editor       = window.focus_editor,
-    close_all          = function()
+    move_up                = move_up,
+    move_down              = move_down,
+    toggle_expand          = toggle_expand,
+    expand_or_open         = expand_or_open,
+    collapse_or_parent     = collapse_or_parent,
+    focus_editor           = window.focus_editor,
+    close_all              = function()
       tree.expanded_paths = {}
       rebuild()
       vim.api.nvim_win_set_cursor(window.sidebar_win, { 1, 0 })
     end,
-    set_root           = set_root,
-    root_up            = root_up,
+    set_root               = set_root,
+    root_up                = root_up,
     -- opening
-    open_split  = function() open_current("split") end,
-    open_vsplit = function() open_current("vsplit") end,
-    open_tab    = function() open_current("tab") end,
+    open_split             = function() open_current("split") end,
+    open_vsplit            = function() open_current("vsplit") end,
+    open_tab               = function() open_current("tab") end,
     -- file operations
-    add               = with_entry(actions.add),
-    add_directory     = with_entry(actions.add_directory),
-    delete            = with_entry(actions.delete),
-    rename            = with_entry(actions.rename),
-    move              = with_entry(actions.move),
-    copy              = with_entry(actions.copy),
-    copy_to_clipboard = with_entry(actions.copy_to_clipboard),
-    cut_to_clipboard  = with_entry(actions.cut_to_clipboard),
-    paste             = with_entry(actions.paste),
+    add                    = with_entry(actions.add),
+    add_directory          = with_entry(actions.add_directory),
+    delete                 = with_entry(actions.delete),
+    rename                 = with_entry(actions.rename),
+    move                   = with_entry(actions.move),
+    copy                   = with_entry(actions.copy),
+    copy_to_clipboard      = with_entry(actions.copy_to_clipboard),
+    cut_to_clipboard       = with_entry(actions.cut_to_clipboard),
+    paste                  = with_entry(actions.paste),
     -- view
-    toggle_hidden = function()
+    toggle_hidden          = function()
       tree.show_hidden = not tree.show_hidden
       rebuild()
     end,
-    refresh = function()
+    refresh                = function()
       git.clear_negative_cache()
+      refresh_projects()
       rebuild()
       git.refresh_all()
     end,
-    help = actions.show_help,
+    help                   = actions.show_help,
     -- filter (neo-tree filesystem defaults)
-    fuzzy_finder = function()
+    fuzzy_finder           = function()
       filter.start({ live = true, fuzzy_finder = true })
     end,
     fuzzy_finder_directory = function()
       filter.start({ live = true, fuzzy_finder = true, kind = "directory" })
     end,
-    fuzzy_sorter = function()
+    fuzzy_sorter           = function()
       filter.start({ live = true, fuzzy_finder = true, use_fzy = true })
     end,
-    filter_on_submit = function()
+    filter_on_submit       = function()
       filter.start({ live = false, keep_on_submit = true })
     end,
-    clear_filter = function()
+    clear_filter           = function()
       filter.clear()
     end,
-    toggle_buffers = function()
+    toggle_buffers         = function()
       M.toggle_buffers()
     end,
-    open_buffer = function()
+    switch_project         = function()
+      local entry = projects.entry_at_cursor()
+      if not entry then return end
+      if vim.fn.isdirectory(entry.path) ~= 1 then
+        vim.notify("Project directory no longer exists: " .. entry.path, vim.log.levels.WARN)
+        refresh_projects()
+        return
+      end
+      local ok, provider = pcall(require, "neovim-project.project")
+      if not ok or type(provider.switch_project) ~= "function" then
+        vim.notify("Unable to load neovim-project", vim.log.levels.ERROR)
+        return
+      end
+      -- Session loading replaces windows and buffers. Close our panes before
+      -- the provider saves the old layout, then recreate them in the new one.
+      local buffers_visible = window.buffers_visible
+      filter.clear()
+      M.close()
+      tree.expanded_paths = {}
+      local switched, err = pcall(provider.switch_project, entry.dir)
+      vim.schedule(function()
+        M.open()
+        if window.buffers_visible ~= buffers_visible then M.toggle_buffers() end
+        if not switched then
+          vim.notify("Could not switch project: " .. tostring(err), vim.log.levels.ERROR)
+        end
+      end)
+    end,
+    open_buffer            = function()
       local e = buffers.entry_at_cursor()
       if e then open_listed(e.bufnr, "edit") end
     end,
     -- h / <Left>: same idea as the tree (collapse / parent). The buffers
     -- list is flat, so this jumps to the file tree below.
-    buffers_collapse = function()
+    buffers_collapse       = function()
       if window.sidebar_win and vim.api.nvim_win_is_valid(window.sidebar_win) then
         vim.api.nvim_set_current_win(window.sidebar_win)
       end
     end,
-    open_buffer_split = function()
+    open_buffer_split      = function()
       local e = buffers.entry_at_cursor()
       if e then open_listed(e.bufnr, "split") end
     end,
-    open_buffer_vsplit = function()
+    open_buffer_vsplit     = function()
       local e = buffers.entry_at_cursor()
       if e then open_listed(e.bufnr, "vsplit") end
     end,
-    open_buffer_tab = function()
+    open_buffer_tab        = function()
       local e = buffers.entry_at_cursor()
       if e then open_listed(e.bufnr, "tab") end
     end,
-    delete_buffer = function()
+    delete_buffer          = function()
       local e = buffers.entry_at_cursor()
       if not e then return end
       if vim.bo[e.bufnr].modified then
@@ -364,8 +401,30 @@ local function sidebar_actions()
       render_buffers()
     end,
     -- close
-    close = M.close,
+    close                  = M.close,
   }
+end
+
+refresh_projects = function()
+  if not window.is_open() then return end
+  local selected = projects.entry_at_cursor()
+  if not config.projects.enable or #projects.collect() == 0 then
+    window.close_projects_window()
+    return
+  end
+  local buf = window.open_projects_window(config.projects.height)
+  if buf then
+    projects.render(buf)
+    if selected then
+      for i, entry in ipairs(projects.entries) do
+        if entry.path == selected.path then
+          vim.api.nvim_win_set_cursor(window.projects_win, { i + 1, 0 })
+          break
+        end
+      end
+    end
+    window.setup_projects_keymaps(buf, sidebar_actions(), { esc_closes = config.mode ~= "sidebar" })
+  end
 end
 
 filter.set_callbacks({
@@ -404,6 +463,7 @@ function M.open()
   if config.buffers.enable then
     M.toggle_buffers()
   end
+  refresh_projects()
 
   if is_split then
     vim.bo[buf].filetype = "SuperTree"
@@ -481,7 +541,7 @@ function M.reveal(path)
   end
 
   local row = tree.row_for_path(path)
-  if not row then return end  -- not visible (e.g. filtered out)
+  if not row then return end -- not visible (e.g. filtered out)
   pcall(vim.api.nvim_win_set_cursor, window.sidebar_win, { row, 0 })
 end
 
@@ -511,44 +571,45 @@ local function define_highlights()
   -- themes do. Falls back to a fixed dark tone for transparent themes.
   local bg = normal_bg()
   local sidebar_bg = bg and darken(bg, 0.75) or "#101010"
-  vim.api.nvim_set_hl(0, "SuperTreeNormal",       { bg = sidebar_bg, default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeNormalNC",     { link = "SuperTreeNormal", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeEndOfBuffer",  { bg = sidebar_bg, fg = sidebar_bg, default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeCursorLine",   { link = "CursorLine", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeNormal", { bg = sidebar_bg, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeNormalNC", { link = "SuperTreeNormal", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeEndOfBuffer", { bg = sidebar_bg, fg = sidebar_bg, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeCursorLine", { link = "CursorLine", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeWinSeparator", { link = "WinSeparator", default = true })
 
   vim.api.nvim_set_hl(0, "SuperTreeFilterTerm", { link = "Special", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeDirectory", { link = "Directory", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeIndent",    { fg = "#4b5263",    default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeNameFade1", { fg = "#6b7380",    default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeNameFade2", { fg = "#4b5263",    default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeNameFade3", { fg = "#32363e",    default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitRepo",   { fg = "#73c936",    default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitHub",    { fg = "#73c936",    default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeIndent", { fg = "#4b5263", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeNameFade1", { fg = "#6b7380", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeNameFade2", { fg = "#4b5263", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeNameFade3", { fg = "#32363e", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitRepo", { fg = "#73c936", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitHub", { fg = "#73c936", default = true })
   -- Git status highlights (muted versions of neo-tree's palette so the
   -- indicators stay in the background visually).
-  vim.api.nvim_set_hl(0, "SuperTreeGitAdded",       { fg = "#467a46", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitDeleted",     { fg = "#a63a00", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitModified",    { fg = "#967a42", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitRenamed",     { link = "SuperTreeGitModified", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitStaged",      { link = "SuperTreeGitAdded", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitUnstaged",    { fg = "#b25e00", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitUntracked",   { fg = "#467a46", italic = true, default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitIgnored",     { fg = "#4b5263", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitConflict",    { fg = "#b25e00", bold = true, italic = true, default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitBranch",      { fg = "#518c26", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitAdded", { fg = "#467a46", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitDeleted", { fg = "#a63a00", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitModified", { fg = "#967a42", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitRenamed", { link = "SuperTreeGitModified", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitStaged", { link = "SuperTreeGitAdded", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitUnstaged", { fg = "#b25e00", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitUntracked", { fg = "#467a46", italic = true, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitIgnored", { fg = "#4b5263", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitConflict", { fg = "#b25e00", bold = true, italic = true, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitBranch", { fg = "#518c26", default = true })
   local branch_hl = vim.api.nvim_get_hl(0, { name = "SuperTreeGitBranch", link = false })
   local branch_fg = branch_hl.fg or 0x518c26
   vim.api.nvim_set_hl(0, "SuperTreeGitBranchFade1", { fg = darken(branch_fg, 0.70), default = true })
   vim.api.nvim_set_hl(0, "SuperTreeGitBranchFade2", { fg = darken(branch_fg, 0.45), default = true })
   vim.api.nvim_set_hl(0, "SuperTreeGitBranchFade3", { fg = darken(branch_fg, 0.22), default = true })
   vim.api.nvim_set_hl(0, "SuperTreeGitAheadBehind", { fg = "#967a42", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeGitClean",       { fg = "#467a46", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeGitClean", { fg = "#467a46", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeDiagnosticError", { link = "DiagnosticError", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeDiagnosticWarn",  { link = "DiagnosticWarn",  default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeDiagnosticInfo",  { link = "DiagnosticInfo",  default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeDiagnosticHint",  { link = "DiagnosticHint",  default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeBuffersCurrent",  { bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeDiagnosticWarn", { link = "DiagnosticWarn", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeDiagnosticInfo", { link = "DiagnosticInfo", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeDiagnosticHint", { link = "DiagnosticHint", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeBuffersCurrent", { bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeProjectsCurrent", { link = "Special", default = true })
   icons.setup_highlights()
 end
 
@@ -559,10 +620,10 @@ function M.setup(opts)
 
   define_highlights()
 
-  vim.api.nvim_create_user_command("SuperTree",       M.toggle,                  {})
-  vim.api.nvim_create_user_command("SuperTreeOpen",   M.open,                    {})
-  vim.api.nvim_create_user_command("SuperTreeClose",  M.close,                   {})
-  vim.api.nvim_create_user_command("SuperTreeFocus",  M.focus,                   {})
+  vim.api.nvim_create_user_command("SuperTree", M.toggle, {})
+  vim.api.nvim_create_user_command("SuperTreeOpen", M.open, {})
+  vim.api.nvim_create_user_command("SuperTreeClose", M.close, {})
+  vim.api.nvim_create_user_command("SuperTreeFocus", M.focus, {})
   vim.api.nvim_create_user_command("SuperTreeReveal", function() M.reveal() end, {})
 
   vim.api.nvim_create_autocmd("User", {
@@ -592,11 +653,11 @@ function M.setup(opts)
       if config.mode ~= "sidebar" then return end
       if not window.is_open() then return end
       local quitting = vim.api.nvim_get_current_win()
-      if quitting == window.sidebar_win or quitting == window.buffers_win then return end
+      if window.is_plugin_win(quitting) then return end
       for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
-        if w ~= quitting and w ~= window.sidebar_win and w ~= window.buffers_win
+        if w ~= quitting and not window.is_plugin_win(w)
             and vim.api.nvim_win_get_config(w).relative == "" then
-          return  -- another normal window remains; nothing to do
+          return -- another normal window remains; nothing to do
         end
       end
       M.close()
@@ -612,12 +673,18 @@ function M.setup(opts)
       local win = tonumber(args.match)
       if win and win == window.sidebar_win then
         window.sidebar_win = nil
+        window.close_projects_window()
         window.close_buffers_window()
         git.reset()
         return
       elseif win and win == window.buffers_win then
         window.buffers_win = nil
         window.buffers_visible = false
+        window.layout_floating_panes()
+        return
+      elseif win and win == window.projects_win then
+        window.projects_win = nil
+        window.layout_floating_panes()
         return
       end
 
@@ -659,9 +726,12 @@ function M.setup(opts)
     callback = function(args)
       if config.mode == "floating" then return end
       if not window.is_open() then return end
-      if args.buf ~= window.sidebar_buf and args.buf ~= window.buffers_buf then return end
+      if args.buf ~= window.sidebar_buf and args.buf ~= window.buffers_buf
+          and args.buf ~= window.projects_buf then
+        return
+      end
       local curwin = vim.api.nvim_get_current_win()
-      if curwin ~= window.sidebar_win and curwin ~= window.buffers_win then return end
+      if not window.is_plugin_win(curwin) then return end
       if window.find_editor_win() then return end
       vim.schedule(function()
         if vim.v.exiting ~= vim.NIL then return end
@@ -682,7 +752,7 @@ function M.setup(opts)
       if filter.is_active() then return end
       if not window.is_open() then return end
       local curwin = vim.api.nvim_get_current_win()
-      if curwin == window.sidebar_win or curwin == window.buffers_win then return end
+      if window.is_plugin_win(curwin) then return end
       if vim.bo[args.buf].buftype ~= "" then return end
       local name = vim.api.nvim_buf_get_name(args.buf)
       if name ~= "" then
@@ -701,10 +771,35 @@ function M.setup(opts)
     end,
   })
 
+  local function project_changed()
+    vim.schedule(function()
+      if not window.is_open() then return end
+      refresh_projects()
+      filter.clear()
+    end)
+  end
+  vim.api.nvim_create_autocmd("DirChanged", {
+    group = group,
+    callback = project_changed,
+  })
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
+    pattern = "SessionLoadPost",
+    callback = project_changed,
+  })
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
+    pattern = "LazyLoad",
+    callback = function(args)
+      if args.data == "neovim-project" then vim.schedule(refresh_projects) end
+    end,
+  })
+
   -- Re-render when the sidebar width changes so repo branch names can
   -- hide/show instead of overlapping the path.
   local function rerender_on_resize()
     if window.is_open() then
+      window.layout_floating_panes()
       tree.render(window.sidebar_buf, config)
     end
   end

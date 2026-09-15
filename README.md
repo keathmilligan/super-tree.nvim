@@ -13,6 +13,7 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 - Three display modes: floating popup, pinned split, or persistent sidebar
 - Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, ahead/behind, stash, lines added/removed)
 - Buffers pane above the tree (independently scrollable and resizable; `B` to toggle)
+- Projects pane above Buffers when [neovim-project](https://github.com/coffebar/neovim-project) has projects available; select a project to switch sessions
 - LSP diagnostic icons on files and directories (bubbled to parents)
 - Background git refresh via filesystem watchers
 
@@ -81,7 +82,7 @@ Neo-tree filesystem defaults where practical. Editing keys are disabled.
 | Key | Action |
 |-----|--------|
 | `j` / `k` / arrows | Move |
-| `<Enter>` / double-click | Toggle directory / open file |
+| `<Enter>` / double-click | Toggle directory / open file / switch project (Projects pane) |
 | `l` / `<Right>` | Expand / open |
 | `h` / `<Left>` | Collapse / jump to parent |
 | `S` / `s` / `t` | Open in split / vsplit / tab |
@@ -128,6 +129,10 @@ require("super-tree").setup({
     enable = true,
     height = 8,
   },
+  projects = {
+    enable = true, -- automatically shown when neovim-project has projects
+    height = 20,
+  },
   diagnostics = {
     enable = true,
     -- symbols = { error = "E", warn = "W", info = "I", hint = "H" },
@@ -149,6 +154,14 @@ require("super-tree").setup({
   },
 })
 ```
+
+### Projects
+
+Automatically appears above Buffers (or above the tree when Buffers is hidden) when [neovim-project](https://github.com/coffebar/neovim-project) is configured and discovers projects. Uses its project patterns, exclusions, and picker sort order. Missing directories are omitted; `R` refreshes the list.
+
+`<Enter>`, double-click, or `l` switches to the selected project through neovim-project, including its session save/load behavior. SuperTree reopens after the switch. The active project is marked with `>`; paths distinguish projects with the same name. Navigate between panes with `<C-w>k` / `<C-w>j`, and resize split panes with `<C-w>+/-` or the mouse.
+
+Set `projects.enable = false` to disable, or `projects.height` to change the initial height (default 20). Without neovim-project or available projects, the pane stays hidden.
 
 ### Buffers
 
