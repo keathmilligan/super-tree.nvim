@@ -1,6 +1,7 @@
 -- Optional neovim-project integration: use its discovery and session switching.
 local window = require("super-tree.window")
 local filter = require("super-tree.filter")
+local fade   = require("super-tree.fade")
 
 local M = { entries = {}, all = {} }
 M.search_pattern = nil
@@ -102,7 +103,7 @@ function M.render(buf)
   M.entries = filter.filter_entries(source, M.search_pattern, M.use_fzy)
   local lines = {}
   for _, entry in ipairs(M.entries) do
-    lines[#lines + 1] = (entry == active and "> " or "  ") .. entry.name
+    lines[#lines + 1] = (entry == active and " > " or "   ") .. entry.name
       .. "  " .. vim.fn.fnamemodify(entry.path, ":~")
   end
   if #lines == 0 then lines = { "" } end
@@ -111,17 +112,18 @@ function M.render(buf)
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
   for i, entry in ipairs(M.entries) do
-    vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 2, {
-      end_col = 2 + #entry.name,
+    vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 3, {
+      end_col = 3 + #entry.name,
       hl_group = entry == active and "SuperTreeProjectsCurrent" or "SuperTreeDirectory",
     })
-    vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 2 + #entry.name, {
+    vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 3 + #entry.name, {
       end_col = #lines[i], hl_group = "SuperTreeNameFade1",
     })
   end
   vim.bo[buf].modifiable = false
   vim.bo[buf].readonly = true
   vim.bo[buf].modified = false
+  fade.attach(buf, { ns })
   if window.projects_win and vim.api.nvim_win_is_valid(window.projects_win) then
     local total = #(M.all or M.entries)
     local header = " Projects  " .. #M.entries

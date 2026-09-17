@@ -97,7 +97,7 @@ local function run()
     supertree.open()
     check(#projects.entries == 2, "duplicate, deleted and non-directory projects must be omitted")
     local lines = vim.api.nvim_buf_get_lines(window.projects_buf, 0, -1, false)
-    check(lines[1]:find("> alpha", 1, true), "cwd below a project should mark it active")
+    check(lines[1]:find(" > alpha", 1, true), "cwd below a project should mark it active")
     check(not vim.bo[window.projects_buf].modifiable and not vim.bo[window.projects_buf].modified,
       "Projects must be an unmodified scratch buffer")
     layout(true)
@@ -147,7 +147,7 @@ local function run()
     check(not filter.is_active(), "old project filter must be cleared")
     layout(true)
     lines = vim.api.nvim_buf_get_lines(window.projects_buf, 0, -1, false)
-    check(lines[1]:find("> beta space", 1, true), "new project must be marked active")
+    check(lines[1]:find(" > beta space", 1, true), "new project must be marked active")
 
     -- Empty discovery hides Projects, and refresh restores it when projects return.
     paths = {}

@@ -137,6 +137,11 @@ require("super-tree").setup({
     enable = true,
     -- symbols = { error = "E", warn = "W", info = "I", hint = "H" },
   },
+  fade = {
+    enable = true,
+    zone = 0.3,            -- last fraction of pane height that fades
+    bottom_opacity = 0.25, -- item on the bottom row of the pane
+  },
   git = {
     enable = true,
     multiline = true, -- two-line layout for git workspaces in the tree
@@ -166,6 +171,10 @@ Set `projects.enable = false` to disable, or `projects.height` to change the ini
 ### Buffers
 
 On by default (`buffers.enable = false` to disable). Press `B` to toggle. The pane is a real window above the tree (`<C-w>k` / `<C-w>j` to move, resize with `<C-w>+/-` or the mouse). The current buffer is marked with `>` and highlighted like the active project. `/` live-filters the list by name or path. `<Enter>` opens, `d` deletes the buffer (the editor window stays and shows the most recently used buffer, or a new unnamed buffer if none remain).
+
+### Fade
+
+The bottom of each pane darkens based on **window height**, not how many items are in the list. A short list in a tall pane stays full strength. Disable with `fade.enable = false`. `fade.zone` is the last fraction of the pane that fades (default `0.3`). `fade.bottom_opacity` is the opacity of an item sitting on the bottom row (default `0.25`).
 
 ### Diagnostics
 

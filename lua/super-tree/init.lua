@@ -7,6 +7,7 @@ local filter      = require("super-tree.filter")
 local buffers     = require("super-tree.buffers")
 local projects    = require("super-tree.projects")
 local diagnostics = require("super-tree.diagnostics")
+local fade        = require("super-tree.fade")
 
 local M           = {}
 
@@ -51,6 +52,12 @@ local config      = {
     enable = true,
     -- nil: use gutter sign text (vim.diagnostic.config().signs), else E/W/I/H
     -- symbols = { error = "E", warn = "W", info = "I", hint = "H" },
+  },
+  -- Bottom-of-pane fade (window height, not list length).
+  fade                            = {
+    enable = true,
+    zone = 0.3,            -- last fraction of pane height that fades
+    bottom_opacity = 0.25, -- item on the bottom row of the pane
   },
   git                             = {
     enable = true,
@@ -670,12 +677,17 @@ function M.setup(opts)
   })
 
   local group = vim.api.nvim_create_augroup("SuperTree", { clear = true })
+  fade.setup(group, config.fade)
 
   -- Re-derive highlights (including the darkened sidebar background) when
   -- the colorscheme changes, since :colorscheme clears them.
   vim.api.nvim_create_autocmd("ColorScheme", {
     group    = group,
-    callback = define_highlights,
+    callback = function()
+      fade.clear_cache()
+      define_highlights()
+      fade.refresh_all()
+    end,
   })
 
   -- Sidebar mode: when the last editor window quits, close the sidebar too

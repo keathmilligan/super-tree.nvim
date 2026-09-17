@@ -4,6 +4,7 @@
 local icons       = require("super-tree.icons")
 local git         = require("super-tree.git")
 local diagnostics = require("super-tree.diagnostics")
+local fade        = require("super-tree.fade")
 
 local M = {}
 
@@ -1008,6 +1009,7 @@ function M.render(sidebar_buf, config)
   vim.bo[sidebar_buf].modifiable = false
   vim.bo[sidebar_buf].readonly   = true
   vim.bo[sidebar_buf].modified   = false
+  fade.attach(sidebar_buf, { ns })
 end
 
 return M

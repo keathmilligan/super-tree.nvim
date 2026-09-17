@@ -4,6 +4,7 @@ local icons       = require("super-tree.icons")
 local diagnostics = require("super-tree.diagnostics")
 local window      = require("super-tree.window")
 local filter      = require("super-tree.filter")
+local fade        = require("super-tree.fade")
 
 local M = {}
 
@@ -100,7 +101,7 @@ function M.render(buf, config)
     local icon = entry.icon or icons.ICON_FILE
     local icon_with_space = icon:match(" $") and icon or icon .. " "
     local extra = entry.modified and " +" or ""
-    local prefix = is_current and "> " or "  "
+    local prefix = is_current and " > " or "   "
     table.insert(lines, prefix .. icon_with_space .. entry.name .. extra)
 
     local lnum = i - 1
@@ -158,6 +159,7 @@ function M.render(buf, config)
   vim.bo[buf].modifiable = false
   vim.bo[buf].readonly   = true
   vim.bo[buf].modified   = false
+  fade.attach(buf, { ns })
 
   if window.buffers_win and vim.api.nvim_win_is_valid(window.buffers_win) then
     vim.wo[window.buffers_win].statusline = header
