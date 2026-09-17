@@ -94,7 +94,7 @@ Neo-tree filesystem defaults where practical. Editing keys are disabled.
 | `d` / `r` / `m` / `c` | Delete / rename / move / copy |
 | `y` / `x` / `p` | Clipboard copy / cut / paste |
 | `H` | Toggle hidden |
-| `/` | Live filter (Enter opens, Esc clears) |
+| `/` | Live filter (tree, buffers, or projects pane; Enter opens, Esc clears) |
 | `D` | Filter directories |
 | `#` | Fuzzy sorter |
 | `f` | Filter on submit |
@@ -157,15 +157,15 @@ require("super-tree").setup({
 
 ### Projects
 
-Automatically appears above Buffers (or above the tree when Buffers is hidden) when [neovim-project](https://github.com/coffebar/neovim-project) is configured and discovers projects. Uses its project patterns, exclusions, and picker sort order. Missing directories are omitted; `R` refreshes the list.
+Automatically appears above Buffers (or above the tree when Buffers is hidden) when [neovim-project](https://github.com/coffebar/neovim-project) is configured and discovers projects. Uses its project patterns and exclusions. Sorted by last used (current project first, then neovim-project history, newest first). Missing directories are omitted; `R` refreshes the list.
 
-`<Enter>`, double-click, or `l` switches to the selected project through neovim-project, including its session save/load behavior. SuperTree reopens after the switch. The active project is marked with `>`; paths distinguish projects with the same name. Navigate between panes with `<C-w>k` / `<C-w>j`, and resize split panes with `<C-w>+/-` or the mouse.
+`<Enter>`, double-click, or `l` switches to the selected project through neovim-project, including its session save/load behavior. SuperTree reopens after the switch. The active project is marked with `>`; paths distinguish projects with the same name. `/` live-filters the list by name or path. Navigate between panes with `<C-w>k` / `<C-w>j`, and resize split panes with `<C-w>+/-` or the mouse.
 
 Set `projects.enable = false` to disable, or `projects.height` to change the initial height (default 20). Without neovim-project or available projects, the pane stays hidden.
 
 ### Buffers
 
-On by default (`buffers.enable = false` to disable). Press `B` to toggle. The pane is a real window above the tree (`<C-w>k` / `<C-w>j` to move, resize with `<C-w>+/-` or the mouse). `<Enter>` opens, `d` deletes the buffer (the editor window stays and shows the most recently used buffer, or a new unnamed buffer if none remain).
+On by default (`buffers.enable = false` to disable). Press `B` to toggle. The pane is a real window above the tree (`<C-w>k` / `<C-w>j` to move, resize with `<C-w>+/-` or the mouse). The current buffer is marked with `>` and highlighted like the active project. `/` live-filters the list by name or path. `<Enter>` opens, `d` deletes the buffer (the editor window stays and shows the most recently used buffer, or a new unnamed buffer if none remain).
 
 ### Diagnostics
 
@@ -173,7 +173,7 @@ Right-aligned signs on files with LSP diagnostics (same text as the gutter: `vim
 
 ### Filter
 
-`/` live-filters the tree (substring match on names, 50 hits). / move the tree while typing; Enter opens the focused node and clears; Esc clears. `D` is directories only. `#` ranks hits with a fzy-like scorer. `f` waits for Enter and keeps the filter (`<C-x>` clears). `find_by_full_path_words` matches against the relative path instead of the filename.
+`/` live-filters the focused pane. In the tree, that is a substring match on names (50 hits); / move while typing; Enter opens the focused node and clears; Esc clears. In Projects or Buffers, `/` filters that list by name or path with the same keys (`#` fuzzy-ranks, `f` waits for Enter, `<C-x>` clears). `D` is tree directories only. `find_by_full_path_words` matches tree hits against the relative path instead of the filename.
 
 ### Modes
 
@@ -195,7 +195,7 @@ Refreshed in the background from directory watchers, git-dir watchers, and `BufW
 
 Sidebar background is darkened from `Normal` and re-derived on `:colorscheme`. Override `SuperTreeNormal` (also `SuperTreeNormalNC`, `SuperTreeEndOfBuffer`, `SuperTreeCursorLine`, `SuperTreeWinSeparator`).
 
-Git highlight groups: `SuperTreeGitAdded`, `SuperTreeGitDeleted`, `SuperTreeGitModified`, `SuperTreeGitRenamed`, `SuperTreeGitStaged`, `SuperTreeGitUnstaged`, `SuperTreeGitUntracked`, `SuperTreeGitIgnored`, `SuperTreeGitConflict`, `SuperTreeGitBranch`, `SuperTreeGitAheadBehind`, `SuperTreeGitClean`.
+Git highlight groups: `SuperTreeGitAdded`, `SuperTreeGitDeleted`, `SuperTreeGitModified`, `SuperTreeGitRenamed`, `SuperTreeGitStaged`, `SuperTreeGitUnstaged`, `SuperTreeGitUntracked`, `SuperTreeGitIgnored`, `SuperTreeGitConflict`, `SuperTreeGitBranch`, `SuperTreeGitAheadBehind`, `SuperTreeGitClean`. Active project and buffer names use `SuperTreeProjectsCurrent` and `SuperTreeBuffersCurrent` (Special, bold).
 
 ### Icons
 

@@ -3,16 +3,28 @@
 local icons       = require("super-tree.icons")
 local diagnostics = require("super-tree.diagnostics")
 local window      = require("super-tree.window")
+local filter      = require("super-tree.filter")
 
 local M = {}
 
-M.entries = {}  -- visible rows after the header: { bufnr, name, path, icon, icon_hl, modified }
+M.entries = {}  -- visible rows: { bufnr, name, path, icon, icon_hl, modified }
+M.all = {}
+M.search_pattern = nil
+M.use_fzy = false
 
 local ns = vim.api.nvim_create_namespace("SuperTreeBuffers")
 
 local function is_plugin_buf(bufnr)
   local ft = vim.bo[bufnr].filetype
   return ft == "SuperTree" or ft == "SuperTreeFilter"
+end
+
+local function editor_bufnr()
+  local win = window.find_editor_win()
+  if win then return vim.api.nvim_win_get_buf(win) end
+  local buf = vim.api.nvim_get_current_buf()
+  if not is_plugin_buf(buf) then return buf end
+  return nil
 end
 
 function M.collect()
@@ -44,6 +56,7 @@ function M.collect()
     if a.lastused ~= b.lastused then return a.lastused > b.lastused end
     return a.name:lower() < b.name:lower()
   end)
+  M.all = list
   M.entries = list
   return list
 end
@@ -52,78 +65,59 @@ function M.entry_at_cursor()
   if not window.buffers_win or not vim.api.nvim_win_is_valid(window.buffers_win) then
     return nil
   end
-  local row = vim.api.nvim_win_get_cursor(window.buffers_win)[1]
-  -- Row 1 is the "Buffers" header.
-  return M.entries[row - 1]
+  return M.entries[vim.api.nvim_win_get_cursor(window.buffers_win)[1]]
 end
 
 function M.render(buf, config)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
   config = config or {}
   M.collect()
+  local all = M.all or M.entries
+  M.entries = filter.filter_entries(all, M.search_pattern, M.use_fzy)
 
-  local total, modified = #M.entries, 0
-  local err_n, warn_n = 0, 0
-  local SEV = vim.diagnostic.severity
+  local total, shown, modified = #all, #M.entries, 0
   for _, entry in ipairs(M.entries) do
     if entry.modified then modified = modified + 1 end
-    local sev = diagnostics.severity(entry.path, false)
-    if sev == SEV.ERROR then
-      err_n = err_n + 1
-    elseif sev == SEV.WARN then
-      warn_n = warn_n + 1
-    end
   end
 
-  local header = " Buffers  " .. total
-  local header_hl = {
-    { start = 1, end_ = 8, hl = "SuperTreeDirectory" }, -- "Buffers"
-    { start = 10, end_ = #header, hl = "SuperTreeIndent" },
-  }
+  local header = " Buffers  " .. shown
+  if M.search_pattern and M.search_pattern ~= "" then
+    header = " Buffers  " .. shown .. "/" .. total
+  end
   if modified > 0 then
-    local seg = "  +" .. modified
-    local s = #header
-    header = header .. seg
-    table.insert(header_hl, { start = s, end_ = #header, hl = "SuperTreeGitModified" })
+    header = header .. "  +" .. modified
+  end
+  if M.search_pattern and M.search_pattern ~= "" then
+    header = header .. '  "' .. M.search_pattern .. '"'
   end
 
-  local lines = { header }
+  local lines = {}
   local icon_hl, name_hl, virt_marks = {}, {}, {}
-  local current = vim.api.nvim_get_current_buf()
-
-  local header_vt = {}
-  if err_n > 0 then
-    table.insert(header_vt, { " " .. err_n, "SuperTreeDiagnosticError" })
-  end
-  if warn_n > 0 then
-    table.insert(header_vt, { " " .. warn_n, "SuperTreeDiagnosticWarn" })
-  end
-  if #header_vt > 0 then
-    table.insert(virt_marks, { line = 0, chunks = header_vt })
-  end
+  local current = editor_bufnr()
 
   for i, entry in ipairs(M.entries) do
+    local is_current = entry.bufnr == current
     local icon = entry.icon or icons.ICON_FILE
     local icon_with_space = icon:match(" $") and icon or icon .. " "
     local extra = entry.modified and " +" or ""
-    local line = " " .. icon_with_space .. entry.name .. extra
-    table.insert(lines, line)
+    local prefix = is_current and "> " or "  "
+    table.insert(lines, prefix .. icon_with_space .. entry.name .. extra)
 
-    local lnum = i  -- 0-indexed: header is 0, first entry is 1
-    local icon_start = 1
+    local lnum = i - 1
+    local icon_start = #prefix
     local icon_end = icon_start + #icon
-    local name_start = 1 + #icon_with_space
+    local name_start = #prefix + #icon_with_space
     local name_end = name_start + #entry.name
 
     if entry.icon_hl then
       table.insert(icon_hl, { line = lnum, start = icon_start, end_ = icon_end, hl = entry.icon_hl })
     end
-    local nh = (entry.bufnr == current) and "SuperTreeBuffersCurrent" or nil
+    table.insert(name_hl, {
+      line = lnum, start = name_start, end_ = name_end,
+      hl = is_current and "SuperTreeBuffersCurrent" or "SuperTreeDirectory",
+    })
     if extra ~= "" then
       table.insert(name_hl, { line = lnum, start = name_end, end_ = name_end + #extra, hl = "SuperTreeGitModified" })
-    end
-    if nh then
-      table.insert(name_hl, { line = lnum, start = name_start, end_ = name_end, hl = nh })
     end
 
     if config.diagnostics and config.diagnostics.enable ~= false then
@@ -134,17 +128,12 @@ function M.render(buf, config)
     end
   end
 
+  if #lines == 0 then lines = { "" } end
+
   vim.bo[buf].modifiable = true
   vim.bo[buf].readonly   = false
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
-
-  for _, pos in ipairs(header_hl) do
-    vim.api.nvim_buf_set_extmark(buf, ns, 0, pos.start, {
-      end_col  = pos.end_,
-      hl_group = pos.hl,
-    })
-  end
 
   for _, pos in ipairs(icon_hl) do
     vim.api.nvim_buf_set_extmark(buf, ns, pos.line, pos.start, {

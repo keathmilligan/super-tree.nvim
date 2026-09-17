@@ -26,9 +26,15 @@ local function run()
   check(not window.projects_win, "no provider should mean no Projects pane")
   supertree.close()
 
+  local gamma = root .. "/gamma"
+  vim.fn.mkdir(gamma, "p")
   local paths = { alpha, beta, alpha .. "/", root .. "/missing", alpha .. "/file.txt" }
+  local history_oldest_first = { gamma, beta }
   package.loaded["neovim-project.utils.path"] = {
     get_all_projects_with_sorting = function() return paths end,
+  }
+  package.loaded["neovim-project.utils.history"] = {
+    get_recent_projects = function() return history_oldest_first end,
   }
   local switched
   package.loaded["neovim-project.project"] = {
@@ -70,23 +76,34 @@ local function run()
     check(window.find_editor_win(), "panes must not replace the editor")
   end
 
+  paths = { gamma, alpha, beta }
+  vim.api.nvim_set_current_dir(alpha)
+  supertree.setup({ git = { enable = false }, diagnostics = { enable = false }, projects = { enable = true } })
+  supertree.open()
+  check(#projects.entries == 3, "sort fixture has three projects")
+  check(projects.entries[1].name == "alpha", "current project is first")
+  check(projects.entries[2].name == "beta space", "more recently used history is next")
+  check(projects.entries[3].name == "gamma", "older history is last")
+  supertree.close()
+  paths = { alpha, beta, alpha .. "/", root .. "/missing", alpha .. "/file.txt" }
+
   for _, mode in ipairs({ "sidebar", "pinned", "floating" }) do
     vim.api.nvim_set_current_dir(alpha .. "/sub")
-    supertree.setup({ mode = mode, projects = { enable = true }, buffers = { enable = true } })
+    supertree.setup({
+      mode = mode,
+      projects = { enable = true, height = 20 },
+      buffers = { enable = true, height = 8 },
+    })
     supertree.open()
     check(#projects.entries == 2, "duplicate, deleted and non-directory projects must be omitted")
     local lines = vim.api.nvim_buf_get_lines(window.projects_buf, 0, -1, false)
-    check(lines[2]:find(" > alpha", 1, true), "cwd below a project should mark it active")
+    check(lines[1]:find("> alpha", 1, true), "cwd below a project should mark it active")
     check(not vim.bo[window.projects_buf].modifiable and not vim.bo[window.projects_buf].modified,
       "Projects must be an unmodified scratch buffer")
     layout(true)
     check(vim.api.nvim_win_get_height(window.projects_win) == 20, "configured Projects height")
     check(vim.api.nvim_win_get_height(window.buffers_win) == 8, "configured Buffers height")
     vim.api.nvim_set_current_win(window.projects_win)
-    vim.api.nvim_win_set_cursor(window.projects_win, { 1, 0 })
-    switched = nil
-    key(window.projects_buf, "<CR>")
-    check(not switched, "header must not switch projects")
     supertree.toggle_buffers()
     layout(false)
     check(vim.api.nvim_win_get_height(window.projects_win) == 20, "hiding Buffers must preserve Projects height")
@@ -94,6 +111,17 @@ local function run()
     layout(true)
     check(vim.api.nvim_win_get_height(window.projects_win) == 20, "showing Buffers must preserve Projects height")
     check(vim.api.nvim_win_get_height(window.buffers_win) == 8, "restored Buffers height")
+    if mode ~= "floating" then
+      local ph = vim.api.nvim_win_get_height(window.projects_win)
+      local bh = vim.api.nvim_win_get_height(window.buffers_win)
+      vim.api.nvim_set_current_win(window.find_editor_win())
+      vim.cmd("vsplit")
+      vim.api.nvim_win_close(vim.api.nvim_get_current_win(), true)
+      check(vim.api.nvim_win_get_height(window.projects_win) == ph,
+        "closing a vsplit must not change Projects height")
+      check(vim.api.nvim_win_get_height(window.buffers_win) == bh,
+        "closing a vsplit must not change Buffers height")
+    end
     if mode == "floating" then
       vim.o.lines = 12
       vim.api.nvim_exec_autocmds("VimResized", {})
@@ -106,7 +134,7 @@ local function run()
     end
 
     -- A reordered discovery list should retain the selected project.
-    vim.api.nvim_win_set_cursor(window.projects_win, { 3, 0 })
+    vim.api.nvim_win_set_cursor(window.projects_win, { 2, 0 })
     paths = { beta, alpha }
     key(window.projects_buf, "R")
     check(projects.entry_at_cursor().path == beta, "refresh must preserve selected project")
@@ -119,7 +147,7 @@ local function run()
     check(not filter.is_active(), "old project filter must be cleared")
     layout(true)
     lines = vim.api.nvim_buf_get_lines(window.projects_buf, 0, -1, false)
-    check(lines[2]:find(" > beta space", 1, true), "new project must be marked active")
+    check(lines[1]:find("> beta space", 1, true), "new project must be marked active")
 
     -- Empty discovery hides Projects, and refresh restores it when projects return.
     paths = {}
@@ -154,7 +182,7 @@ local function run()
   local provider = package.loaded["neovim-project.project"]
   provider.switch_project = function() error("test switch failure") end
   vim.api.nvim_set_current_win(window.projects_win)
-  vim.api.nvim_win_set_cursor(window.projects_win, { 2, 0 })
+  vim.api.nvim_win_set_cursor(window.projects_win, { 1, 0 })
   key(window.projects_buf, "<CR>")
   check(vim.wait(1000, function() return supertree.is_open() end), "reopen after a provider error")
   check(message and message:find("test switch failure", 1, true), "report switch errors")

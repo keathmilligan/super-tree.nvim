@@ -16,6 +16,7 @@ end
 
 -- Saved expansion state so clearing a filter restores the pre-search tree.
 local saved_expanded = nil
+local restore_expanded
 
 local input_win = nil
 local input_buf = nil
@@ -63,6 +64,114 @@ local function glob_match(term, name, rel, full_path_words)
     return true
   end
   return name:lower():find(term:lower(), 1, true) ~= nil
+end
+
+-- Substring or fuzzy match against a list row (buffers / projects).
+function M.matches(term, name, path, use_fzy)
+  if not term or term == "" then return true, 0 end
+  name = name or ""
+  path = path or ""
+  local pretty = path ~= "" and vim.fn.fnamemodify(path, ":~") or ""
+  if use_fzy then
+    local s = fuzzy_score(term, name) or (pretty ~= "" and fuzzy_score(term, pretty))
+      or (path ~= "" and fuzzy_score(term, path))
+    return s ~= nil, s or 0
+  end
+  local t = term:lower()
+  if name:lower():find(t, 1, true) then return true, 0 end
+  if pretty ~= "" and pretty:lower():find(t, 1, true) then return true, 0 end
+  if path ~= "" and path:lower():find(t, 1, true) then return true, 0 end
+  return false, 0
+end
+
+function M.filter_entries(entries, term, use_fzy)
+  if not term or term == "" then return entries end
+  local visible, scores = {}, {}
+  for _, entry in ipairs(entries) do
+    local ok, s = M.matches(term, entry.name, entry.path, use_fzy)
+    if ok then
+      visible[#visible + 1] = entry
+      scores[entry] = s
+    end
+  end
+  if use_fzy then
+    table.sort(visible, function(a, b)
+      local sa, sb = scores[a] or 0, scores[b] or 0
+      if sa ~= sb then return sa > sb end
+      return (a.name or "") < (b.name or "")
+    end)
+  end
+  return visible
+end
+
+local function pane_win(target)
+  if target == "projects" and window.projects_win and vim.api.nvim_win_is_valid(window.projects_win) then
+    return window.projects_win
+  end
+  if target == "buffers" and window.buffers_win and vim.api.nvim_win_is_valid(window.buffers_win) then
+    return window.buffers_win
+  end
+  return window.sidebar_win
+end
+
+local function detect_target()
+  local win = vim.api.nvim_get_current_win()
+  if win == window.projects_win then return "projects" end
+  if win == window.buffers_win then return "buffers" end
+  return "tree"
+end
+
+local function pane_module(target)
+  if target == "projects" then return require("super-tree.projects") end
+  if target == "buffers" then return require("super-tree.buffers") end
+  return nil
+end
+
+local function clear_pane(target)
+  if target == "tree" then
+    tree.search_pattern = nil
+    tree.search_matches = nil
+    tree.search_scores  = nil
+    tree.search_kind    = nil
+    restore_expanded()
+    if callbacks.rebuild then callbacks.rebuild() end
+    return
+  end
+  local mod = pane_module(target)
+  if not mod then return end
+  mod.search_pattern = nil
+  mod.use_fzy = false
+  if target == "projects" then
+    if callbacks.render_projects then callbacks.render_projects() end
+  elseif callbacks.render_buffers then
+    callbacks.render_buffers()
+  end
+end
+
+local function apply_pane_search(target, term, opts)
+  local mod = pane_module(target)
+  if not mod then return end
+  local selected = mod.entry_at_cursor()
+  local id_key = target == "projects" and "path" or "bufnr"
+  mod.search_pattern = (term and term ~= "") and term or nil
+  mod.use_fzy = opts.use_fzy == true
+  if target == "projects" then
+    if callbacks.render_projects then callbacks.render_projects() end
+  elseif callbacks.render_buffers then
+    callbacks.render_buffers()
+  end
+  local win = pane_win(target)
+  if not win or not vim.api.nvim_win_is_valid(win) then return end
+  local row = 1
+  if selected then
+    for i, entry in ipairs(mod.entries) do
+      if entry[id_key] == selected[id_key] then
+        row = i
+        break
+      end
+    end
+  end
+  pcall(vim.api.nvim_win_set_cursor, win, { row, 0 })
 end
 
 -- Walk `cwd` and collect matching paths. Skips hidden/gitignored entries
@@ -148,7 +257,7 @@ end
 -- Apply / clear
 -- ---------------------------------------------------------------------------
 
-local function restore_expanded()
+restore_expanded = function()
   if saved_expanded then
     tree.expanded_paths = saved_expanded
     saved_expanded = nil
@@ -156,6 +265,13 @@ local function restore_expanded()
 end
 
 local function apply_search(term)
+  local opts = current_opts or {}
+  local target = opts.target or "tree"
+  if target == "buffers" or target == "projects" then
+    apply_pane_search(target, term, opts)
+    return
+  end
+
   local config = callbacks.get_config and callbacks.get_config() or {}
   if not term or term == "" then
     tree.search_pattern = nil
@@ -175,7 +291,6 @@ local function apply_search(term)
     saved_expanded = vim.deepcopy(tree.expanded_paths)
   end
 
-  local opts = current_opts or {}
   local matches, scores = collect_matches(term, opts, config)
   tree.search_pattern = term
   tree.search_matches = matches
@@ -201,14 +316,31 @@ local function apply_search(term)
   end
 end
 
-function M.clear()
+function M.clear(target)
   M.close_input(true)
+  if target then
+    clear_pane(target)
+    return
+  end
   tree.search_pattern = nil
   tree.search_matches = nil
   tree.search_scores  = nil
   tree.search_kind    = nil
   restore_expanded()
+  local buffers = require("super-tree.buffers")
+  local projects = require("super-tree.projects")
+  buffers.search_pattern = nil
+  buffers.use_fzy = false
+  projects.search_pattern = nil
+  projects.use_fzy = false
   if callbacks.rebuild then callbacks.rebuild() end
+  if callbacks.render_projects then callbacks.render_projects() end
+end
+
+function M.close_if_target(target)
+  if current_opts and current_opts.target == target then
+    M.close_input(false)
+  end
 end
 
 function M.is_active()
@@ -216,7 +348,11 @@ function M.is_active()
 end
 
 -- Apply `term` immediately (used by the input popup and by tests).
-function M.apply_term(term)
+-- `target` is "tree", "buffers", or "projects" (default: current / tree).
+function M.apply_term(term, target)
+  if target then
+    current_opts = vim.tbl_extend("force", current_opts or {}, { target = target, live = true })
+  end
   apply_search(term or "")
 end
 
@@ -235,6 +371,14 @@ local function stop_timer()
 end
 
 local function prefix_for(opts)
+  if opts.target == "projects" then
+    if not opts.live then return "Search Projects: " end
+    return "Filter Projects: "
+  end
+  if opts.target == "buffers" then
+    if not opts.live then return "Search Buffers: " end
+    return "Filter Buffers: "
+  end
   if opts.kind == "directory" then return "Filter Directories: " end
   if not opts.live then return "Search: " end
   return "Filter: "
@@ -259,6 +403,7 @@ local function current_term()
 end
 
 function M.close_input(keep_filter)
+  local target = current_opts and current_opts.target or "tree"
   stop_timer()
   if input_win and vim.api.nvim_win_is_valid(input_win) then
     pcall(vim.api.nvim_win_close, input_win, true)
@@ -267,14 +412,12 @@ function M.close_input(keep_filter)
   input_buf = nil
   current_opts = nil
   if not keep_filter then
-    tree.search_pattern = nil
-    tree.search_matches = nil
-    tree.search_scores  = nil
-    tree.search_kind    = nil
-    restore_expanded()
-    if callbacks.rebuild then callbacks.rebuild() end
+    clear_pane(target)
   end
-  if window.is_open() then
+  local win = pane_win(target)
+  if win and vim.api.nvim_win_is_valid(win) then
+    pcall(vim.api.nvim_set_current_win, win)
+  elseif window.is_open() then
     pcall(vim.api.nvim_set_current_win, window.sidebar_win)
   end
 end
@@ -315,6 +458,7 @@ function M.start(opts)
     kind           = opts.kind,
     use_fzy        = opts.use_fzy == true,
     keep_on_submit = opts.keep_on_submit == true,
+    target         = opts.target or detect_target(),
   }
 
   local prefix = prefix_for(current_opts)
@@ -324,7 +468,8 @@ function M.start(opts)
   vim.bo[input_buf].filetype  = "SuperTreeFilter"
   vim.api.nvim_buf_set_lines(input_buf, 0, -1, false, { prefix })
 
-  local sw = window.sidebar_win
+  local sw = pane_win(current_opts.target)
+  if not sw or not vim.api.nvim_win_is_valid(sw) then sw = window.sidebar_win end
   local width  = vim.api.nvim_win_get_width(sw)
   local height = vim.api.nvim_win_get_height(sw)
   input_win = vim.api.nvim_open_win(input_buf, true, {
@@ -352,10 +497,15 @@ function M.start(opts)
     local term = current_term()
     local fuzzy = current_opts and current_opts.fuzzy_finder
     local keep  = current_opts and current_opts.keep_on_submit
+    local target = current_opts and current_opts.target or "tree"
     if fuzzy and not keep then
       -- Open the focused node, then drop the filter.
       M.close_input(false)
-      if callbacks.open_current then callbacks.open_current() end
+      if callbacks.activate then
+        callbacks.activate(target)
+      elseif callbacks.open_current then
+        callbacks.open_current()
+      end
     else
       apply_search(term)
       M.close_input(true)
@@ -383,15 +533,20 @@ function M.start(opts)
   end, map_opts)
 
   if current_opts.fuzzy_finder then
-    local function tree_move(fn)
+    local function pane_move(delta)
       return function()
-        if fn then fn() end
+        local win = pane_win(current_opts and current_opts.target)
+        if not win or not vim.api.nvim_win_is_valid(win) then return end
+        local row = vim.api.nvim_win_get_cursor(win)[1]
+        local last = vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(win))
+        row = math.max(1, math.min(last, row + delta))
+        pcall(vim.api.nvim_win_set_cursor, win, { row, 0 })
       end
     end
-    vim.keymap.set("i", "<Down>", tree_move(callbacks.move_down), map_opts)
-    vim.keymap.set("i", "<C-n>",  tree_move(callbacks.move_down), map_opts)
-    vim.keymap.set("i", "<Up>",   tree_move(callbacks.move_up),   map_opts)
-    vim.keymap.set("i", "<C-p>",  tree_move(callbacks.move_up),   map_opts)
+    vim.keymap.set("i", "<Down>", pane_move(1),  map_opts)
+    vim.keymap.set("i", "<C-n>",  pane_move(1),  map_opts)
+    vim.keymap.set("i", "<Up>",   pane_move(-1), map_opts)
+    vim.keymap.set("i", "<C-p>",  pane_move(-1), map_opts)
   end
 
   vim.api.nvim_create_autocmd("TextChangedI", {

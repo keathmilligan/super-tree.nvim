@@ -332,7 +332,14 @@ local function sidebar_actions()
       filter.start({ live = false, keep_on_submit = true })
     end,
     clear_filter           = function()
-      filter.clear()
+      local win = vim.api.nvim_get_current_win()
+      if win == window.projects_win then
+        filter.clear("projects")
+      elseif win == window.buffers_win then
+        filter.clear("buffers")
+      else
+        filter.clear("tree")
+      end
     end,
     toggle_buffers         = function()
       M.toggle_buffers()
@@ -409,6 +416,7 @@ refresh_projects = function()
   if not window.is_open() then return end
   local selected = projects.entry_at_cursor()
   if not config.projects.enable or #projects.collect() == 0 then
+    filter.close_if_target("projects")
     window.close_projects_window()
     return
   end
@@ -418,7 +426,7 @@ refresh_projects = function()
     if selected then
       for i, entry in ipairs(projects.entries) do
         if entry.path == selected.path then
-          vim.api.nvim_win_set_cursor(window.projects_win, { i + 1, 0 })
+          vim.api.nvim_win_set_cursor(window.projects_win, { i, 0 })
           break
         end
       end
@@ -428,11 +436,27 @@ refresh_projects = function()
 end
 
 filter.set_callbacks({
-  get_config   = function() return config end,
-  rebuild      = rebuild,
-  open_current = toggle_expand,
-  move_up      = move_up,
-  move_down    = move_down,
+  get_config       = function() return config end,
+  rebuild          = rebuild,
+  open_current     = toggle_expand,
+  move_up          = move_up,
+  move_down        = move_down,
+  render_buffers   = render_buffers,
+  render_projects  = function()
+    if window.projects_buf and vim.api.nvim_buf_is_valid(window.projects_buf) then
+      projects.render(window.projects_buf)
+    end
+  end,
+  activate         = function(target)
+    local acts = sidebar_actions()
+    if target == "projects" then
+      acts.switch_project()
+    elseif target == "buffers" then
+      acts.open_buffer()
+    else
+      toggle_expand()
+    end
+  end,
 })
 
 -- ---------------------------------------------------------------------------
@@ -475,6 +499,9 @@ end
 function M.toggle_buffers()
   if not window.is_open() then return end
   if window.buffers_visible then
+    filter.close_if_target("buffers")
+    buffers.search_pattern = nil
+    buffers.use_fzy = false
     window.close_buffers_window()
     return
   end
@@ -608,8 +635,14 @@ local function define_highlights()
   vim.api.nvim_set_hl(0, "SuperTreeDiagnosticWarn", { link = "DiagnosticWarn", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeDiagnosticInfo", { link = "DiagnosticInfo", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeDiagnosticHint", { link = "DiagnosticHint", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeBuffersCurrent", { bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeProjectsCurrent", { link = "Special", default = true })
+  local special = vim.api.nvim_get_hl(0, { name = "Special", link = false })
+  local current_item = { bold = true, default = true }
+  if special.fg then current_item.fg = special.fg end
+  if special.bg then current_item.bg = special.bg end
+  if special.ctermfg then current_item.ctermfg = special.ctermfg end
+  if special.ctermbg then current_item.ctermbg = special.ctermbg end
+  vim.api.nvim_set_hl(0, "SuperTreeBuffersCurrent", current_item)
+  vim.api.nvim_set_hl(0, "SuperTreeProjectsCurrent", current_item)
   icons.setup_highlights()
 end
 

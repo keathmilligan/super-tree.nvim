@@ -321,7 +321,7 @@ local HELP_ENTRIES = {
   { "x",              "cut node to clipboard" },
   { "p",              "paste clipboard node here" },
   { "H",              "toggle hidden (dotfiles, gitignored)" },
-  { "/",              "live filter (fuzzy finder)" },
+  { "/",              "live filter (tree / buffers / projects)" },
   { "D",              "filter directories" },
   { "#",              "fuzzy sorter" },
   { "f",              "filter on submit" },

@@ -272,15 +272,17 @@ local function open_pane(pane, height, title)
     M[key] = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(M[key], buf)
     vim.api.nvim_win_set_height(M[key], height)
-    apply_win_opts(M[key], { statusline = " " .. title, winfixwidth = true })
+    -- Keep stacked panes at their height when other windows split or close
+    -- ('equalalways'). The tree stays flexible and absorbs leftover space.
+    -- winfixheight does not block <C-w>+/- or mouse resize.
+    apply_win_opts(M[key], { statusline = " " .. title, winfixwidth = true, winfixheight = true })
     vim.wo[M.sidebar_win].winfixheight = false
     if sibling_height then
       -- :split can equalize the whole column. Keep the existing pane's
       -- user-adjusted height, taking the new pane's space from the tree.
-      vim.wo[M[key]].winfixheight = true
+      vim.wo[sibling].winfixheight = true
       vim.api.nvim_win_set_height(sibling, sibling_height)
     end
-    vim.wo[M[key]].winfixheight = false
     vim.api.nvim_set_current_win(current)
   end
 
@@ -625,6 +627,10 @@ function M.setup_projects_keymaps(buf, actions, keymap_opts)
     ["B"]             = actions.toggle_buffers,
     ["R"]             = actions.refresh,
     ["?"]             = actions.help,
+    ["/"]             = actions.fuzzy_finder,
+    ["#"]             = actions.fuzzy_sorter,
+    ["f"]             = actions.filter_on_submit,
+    ["<C-x>"]         = actions.clear_filter,
     ["q"]             = actions.close,
     ["<Esc>"]         = (keymap_opts.esc_closes ~= false) and actions.close or nil,
   }
@@ -651,6 +657,10 @@ function M.setup_buffers_keymaps(buf, actions, keymap_opts)
     ["B"]             = actions.toggle_buffers,
     ["R"]             = actions.refresh,
     ["?"]             = actions.help,
+    ["/"]             = actions.fuzzy_finder,
+    ["#"]             = actions.fuzzy_sorter,
+    ["f"]             = actions.filter_on_submit,
+    ["<C-x>"]         = actions.clear_filter,
     ["q"]             = actions.close,
     ["<Esc>"]         = (keymap_opts.esc_closes ~= false) and actions.close or nil,
   }
