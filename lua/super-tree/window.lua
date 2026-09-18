@@ -328,6 +328,33 @@ function M.close_projects_window()
   close_pane("projects")
 end
 
+function M.get_pane_heights()
+  local result = vim.deepcopy(pane_heights)
+  if M.buffers_win and vim.api.nvim_win_is_valid(M.buffers_win) then
+    result.buffers = vim.api.nvim_win_get_height(M.buffers_win)
+  end
+  if M.projects_win and vim.api.nvim_win_is_valid(M.projects_win) then
+    result.projects = vim.api.nvim_win_get_height(M.projects_win)
+  end
+  return result
+end
+
+function M.set_pane_heights(heights)
+  if type(heights) ~= "table" then return end
+  for _, pane in ipairs({ "buffers", "projects" }) do
+    local height = tonumber(heights[pane])
+    if height and height > 0 then
+      pane_heights[pane] = math.max(1, math.floor(height))
+      local win = M[pane .. "_win"]
+      if win and vim.api.nvim_win_is_valid(win)
+          and vim.api.nvim_win_get_config(win).relative == "" then
+        pcall(vim.api.nvim_win_set_height, win, pane_heights[pane])
+      end
+    end
+  end
+  M.layout_floating_panes()
+end
+
 function M.is_plugin_win(win)
   return win ~= nil and (win == M.sidebar_win or win == M.buffers_win or win == M.projects_win)
 end
@@ -390,6 +417,18 @@ function M.find_editor_win()
   if usable(prev) then return prev end
   for _, w in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
     if usable(w) then return w end
+  end
+  return nil
+end
+
+-- Find any ordinary window beside SuperTree, including terminals and utility
+-- windows that are intentionally unsafe as file-opening targets.
+function M.find_non_plugin_win()
+  for _, win in ipairs(vim.api.nvim_tabpage_list_wins(0)) do
+    if vim.api.nvim_win_is_valid(win) and not M.is_plugin_win(win)
+        and vim.api.nvim_win_get_config(win).relative == "" then
+      return win
+    end
   end
   return nil
 end

@@ -359,18 +359,20 @@ local function sidebar_actions()
         refresh_projects()
         return
       end
-      local ok, provider = pcall(require, "neovim-project.project")
-      if not ok or type(provider.switch_project) ~= "function" then
-        vim.notify("Unable to load neovim-project", vim.log.levels.ERROR)
+      if projects.provider_manages_state() then
+        local switched, err = projects.open(entry)
+        if not switched then
+          vim.notify("Could not switch project: " .. tostring(err), vim.log.levels.ERROR)
+        end
         return
       end
       -- Session loading replaces windows and buffers. Close our panes before
-      -- the provider saves the old layout, then recreate them in the new one.
+      -- a legacy provider saves the old layout, then recreate them in the new one.
       local buffers_visible = window.buffers_visible
       filter.clear()
       M.close()
       tree.expanded_paths = {}
-      local switched, err = pcall(provider.switch_project, entry.dir)
+      local switched, err = projects.open(entry)
       vim.schedule(function()
         M.open()
         if window.buffers_visible ~= buffers_visible then M.toggle_buffers() end
@@ -532,6 +534,108 @@ end
 function M.get_width()
   if not M.is_open() then return 0 end
   return config.width + 1
+end
+
+local function selected_path(win, getter, field)
+  if not (win and vim.api.nvim_win_is_valid(win)) then return nil end
+  local ok, entry = pcall(getter)
+  if not ok or not entry then return nil end
+  return entry[field]
+end
+
+function M.capture_state()
+  local expanded = {}
+  for directory, is_open in pairs(tree.expanded_paths) do
+    if is_open then expanded[#expanded + 1] = directory end
+  end
+  table.sort(expanded)
+
+  local current = vim.api.nvim_get_current_win()
+  local focused = window.projects_win == current and "projects"
+    or window.buffers_win == current and "buffers"
+    or window.sidebar_win == current and "tree"
+    or "editor"
+  return {
+    version = 1,
+    root = vim.fn.getcwd(),
+    open = M.is_open(),
+    expanded_paths = expanded,
+    selected_path = selected_path(window.sidebar_win, get_current_entry, "path"),
+    show_hidden = tree.show_hidden == true,
+    buffers_visible = window.buffers_visible == true,
+    projects_visible = window.projects_win ~= nil and vim.api.nvim_win_is_valid(window.projects_win),
+    selected_buffer = selected_path(window.buffers_win, buffers.entry_at_cursor, "path"),
+    selected_project = selected_path(window.projects_win, projects.entry_at_cursor, "root"),
+    focused_pane = focused,
+    sidebar_width = M.is_open() and vim.api.nvim_win_get_width(window.sidebar_win) or config.width,
+    pane_heights = window.get_pane_heights(),
+  }
+end
+
+local function restore_list_cursor(win, entries, field, value)
+  if not value or not (win and vim.api.nvim_win_is_valid(win)) then return end
+  for index, entry in ipairs(entries or {}) do
+    if entry[field] == value then
+      pcall(vim.api.nvim_win_set_cursor, win, { index, 0 })
+      return
+    end
+  end
+end
+
+function M.restore_state(state)
+  if type(state) ~= "table" or state.version ~= 1 then return false end
+  if type(state.root) == "string" and vim.fn.isdirectory(state.root) == 1 then
+    vim.api.nvim_set_current_dir(state.root)
+  end
+  filter.close_input(false)
+  tree.search_pattern = nil
+  buffers.search_pattern = nil
+  projects.search_pattern = nil
+  tree.expanded_paths = {}
+  for _, directory in ipairs(state.expanded_paths or {}) do
+    if type(directory) == "string" and vim.fn.isdirectory(directory) == 1 then
+      tree.expanded_paths[directory] = true
+    end
+  end
+  tree.show_hidden = state.show_hidden == true
+  if not state.open then
+    if M.is_open() then M.close() end
+    return true
+  end
+
+  if M.is_open() then M.close() end
+  if tonumber(state.sidebar_width) and state.sidebar_width > 0 then
+    config.width = math.floor(state.sidebar_width)
+  end
+  M.open()
+  if window.buffers_visible ~= (state.buffers_visible == true) then M.toggle_buffers() end
+  if not state.projects_visible then window.close_projects_window() end
+  window.set_pane_heights(state.pane_heights)
+  if state.selected_path then M.reveal(state.selected_path) end
+  restore_list_cursor(window.buffers_win, buffers.entries, "path", state.selected_buffer)
+  restore_list_cursor(window.projects_win, projects.entries, "root", state.selected_project)
+
+  local focus = state.focused_pane
+  if focus == "projects" and window.projects_win and vim.api.nvim_win_is_valid(window.projects_win) then
+    vim.api.nvim_set_current_win(window.projects_win)
+  elseif focus == "buffers" and window.buffers_win and vim.api.nvim_win_is_valid(window.buffers_win) then
+    vim.api.nvim_set_current_win(window.buffers_win)
+  elseif focus == "tree" and window.sidebar_win and vim.api.nvim_win_is_valid(window.sidebar_win) then
+    vim.api.nvim_set_current_win(window.sidebar_win)
+  else
+    window.focus_editor()
+  end
+  return true
+end
+
+function M.register_project_provider(name, provider)
+  projects.register_provider(name, provider)
+  if window.is_open() then vim.schedule(refresh_projects) end
+end
+
+function M.unregister_project_provider(name)
+  projects.unregister_provider(name)
+  if window.is_open() then vim.schedule(refresh_projects) end
 end
 
 function M.toggle()
@@ -738,7 +842,7 @@ function M.setup(opts)
         if vim.v.exiting ~= vim.NIL then return end
         if config.mode == "floating" then return end
         if not window.is_open() then return end
-        if window.find_editor_win() then return end
+        if window.find_non_plugin_win() then return end
         window.ensure_editor_win(config.width)
       end)
     end,
@@ -777,12 +881,12 @@ function M.setup(opts)
       end
       local curwin = vim.api.nvim_get_current_win()
       if not window.is_plugin_win(curwin) then return end
-      if window.find_editor_win() then return end
+      if window.find_non_plugin_win() then return end
       vim.schedule(function()
         if vim.v.exiting ~= vim.NIL then return end
         if config.mode == "floating" then return end
         if not window.is_open() then return end
-        if window.find_editor_win() then return end
+        if window.find_non_plugin_win() then return end
         window.ensure_editor_win(config.width)
       end)
     end,
@@ -834,9 +938,17 @@ function M.setup(opts)
   })
   vim.api.nvim_create_autocmd("User", {
     group = group,
+    pattern = { "SuperProjectRegistryChanged", "SuperProjectSwitchPost" },
+    callback = project_changed,
+  })
+  vim.api.nvim_create_autocmd("User", {
+    group = group,
     pattern = "LazyLoad",
     callback = function(args)
-      if args.data == "neovim-project" then vim.schedule(refresh_projects) end
+      if args.data == "neovim-project" or args.data == "super-project.nvim"
+          or args.data == "super-project" then
+        vim.schedule(refresh_projects)
+      end
     end,
   })
 

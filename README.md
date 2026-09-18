@@ -13,7 +13,7 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 - Three display modes: floating popup, pinned split, or persistent sidebar
 - Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, ahead/behind, stash, lines added/removed)
 - Buffers pane above the tree (independently scrollable and resizable; `B` to toggle)
-- Projects pane above Buffers when [neovim-project](https://github.com/coffebar/neovim-project) has projects available; select a project to switch sessions
+- Projects pane above Buffers when [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) or [neovim-project](https://github.com/coffebar/neovim-project) has projects available; select a project to switch workspaces
 - LSP diagnostic icons on files and directories (bubbled to parents)
 - Background git refresh via filesystem watchers
 
@@ -162,11 +162,26 @@ require("super-tree").setup({
 
 ### Projects
 
-Automatically appears above Buffers (or above the tree when Buffers is hidden) when [neovim-project](https://github.com/coffebar/neovim-project) is configured and discovers projects. Uses its project patterns and exclusions. Sorted by last used (current project first, then neovim-project history, newest first). Missing directories are omitted; `R` refreshes the list.
+Automatically appears above Buffers (or above the tree when Buffers is hidden) when a supported project provider discovers projects. [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) registers its native provider automatically; neovim-project remains the fallback. Projects are sorted by last use with the current project first. Missing directories are omitted; `R` refreshes the list.
 
-`<Enter>`, double-click, or `l` switches to the selected project through neovim-project, including its session save/load behavior. SuperTree reopens after the switch. The active project is marked with `>`; paths distinguish projects with the same name. `/` live-filters the list by name or path. Navigate between panes with `<C-w>k` / `<C-w>j`, and resize split panes with `<C-w>+/-` or the mouse.
+`<Enter>`, double-click, or `l` switches through the active provider. With super-project.nvim, SuperTree's root, visibility, expanded directories, selection, hidden-entry state, and pane dimensions are restored per workspace. The active project is marked with `>`; paths distinguish projects with the same name. `/` live-filters the list by name or path. Navigate between panes with `<C-w>k` / `<C-w>j`, and resize split panes with `<C-w>+/-` or the mouse.
 
-Set `projects.enable = false` to disable, or `projects.height` to change the initial height (default 20). Without neovim-project or available projects, the pane stays hidden.
+Set `projects.enable = false` to disable, or `projects.height` to change the initial height (default 20). Without a provider or available projects, the pane stays hidden.
+
+### Project provider and state API
+
+Project managers can register a native provider:
+
+```lua
+require("super-tree").register_project_provider("my-projects", {
+  projects = function(opts) return {} end, -- { root, name, rank, active }[]
+  current = function() return nil end,      -- { root = "..." } or nil
+  open = function(root) end,
+  manages_tree_state = true,
+})
+```
+
+`capture_state()` returns serializable UI state and `restore_state(state)` reapplies it through SuperTree's own window APIs. super-project.nvim uses these hooks automatically; consumers should not access `super-tree.tree` or `super-tree.window` state directly.
 
 ### Buffers
 
@@ -226,7 +241,7 @@ The plugin fires `User SuperTreeOpen` / `SuperTreeClose` and redraws the tabline
 
 ## Limitations
 
-No persistent state across sessions. Mouse clicks require `mouse` to include normal mode (e.g. `set mouse=a`).
+SuperTree does not persist state by itself; super-project.nvim can persist it per workspace. Mouse clicks require `mouse` to include normal mode (e.g. `set mouse=a`).
 
 ## License
 
