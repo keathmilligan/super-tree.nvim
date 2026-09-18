@@ -550,13 +550,28 @@ end
 -- `actions` is a table of named callbacks; see the `map` table below.
 -- `keymap_opts` (optional): { esc_closes = boolean } - when false, <Esc> is
 -- left unmapped so the sidebar behaves like a persistent window.
+local function disable_pane_splits(buf, opts)
+  -- Splitting a plugin buffer duplicates it outside the managed pane layout.
+  -- Keep the other <C-w> commands available for navigation and resizing.
+  for _, key in ipairs({
+    "<C-w>s",
+    "<C-w>S",
+    "<C-w><C-s>",
+    "<C-w>v",
+    "<C-w><C-v>",
+  }) do
+    vim.keymap.set("n", key, "<Nop>", opts)
+  end
+end
+
 function M.setup_keymaps(buf, actions, keymap_opts)
   keymap_opts = keymap_opts or {}
   local opts = { buffer = buf, nowait = true, silent = true }
+  disable_pane_splits(buf, opts)
 
   -- Disable keys that would edit the buffer or trigger confusing motions.
-  -- Action mappings are set afterwards and take precedence. Window commands
-  -- (<C-w> ...) and plain motions like j/k/gg/G stay enabled so the sidebar
+  -- Action mappings are set afterwards and take precedence. Window navigation
+  -- and resizing plus plain motions like j/k/gg/G stay enabled so the sidebar
   -- can be navigated into and out of like a normal window.
   local nop_keys = {
     -- visual
@@ -655,6 +670,7 @@ end
 function M.setup_projects_keymaps(buf, actions, keymap_opts)
   keymap_opts = keymap_opts or {}
   local opts = { buffer = buf, nowait = true, silent = true }
+  disable_pane_splits(buf, opts)
   local map = {
     ["<CR>"]          = actions.switch_project,
     ["<2-LeftMouse>"] = actions.switch_project,
@@ -681,6 +697,7 @@ end
 function M.setup_buffers_keymaps(buf, actions, keymap_opts)
   keymap_opts = keymap_opts or {}
   local opts = { buffer = buf, nowait = true, silent = true }
+  disable_pane_splits(buf, opts)
   local map = {
     ["<CR>"]          = actions.open_buffer,
     ["<2-LeftMouse>"] = actions.open_buffer,

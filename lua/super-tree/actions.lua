@@ -307,7 +307,7 @@ local HELP_ENTRIES = {
   { "s",              "open in vertical split" },
   { "t",              "open in new tab" },
   { "<Tab>",          "jump to editor window" },
-  { "<C-w> ...",      "standard window commands" },
+  { "<C-w> ...",      "navigate / resize windows" },
   { ".",              "set directory as root (:cd)" },
   { "<BS>",           "root to parent directory" },
   { "z",              "collapse all directories" },

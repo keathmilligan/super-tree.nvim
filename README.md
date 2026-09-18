@@ -87,7 +87,7 @@ Neo-tree filesystem defaults where practical. Editing keys are disabled.
 | `h` / `<Left>` | Collapse / jump to parent |
 | `S` / `s` / `t` | Open in split / vsplit / tab |
 | `<Tab>` | Jump to editor |
-| `<C-w>` … | Window commands |
+| `<C-w>` … | Navigate / resize windows (split commands are disabled) |
 | `.` / `<BS>` | Set root / root up |
 | `z` | Collapse all |
 | `a` / `A` | Add file / directory |

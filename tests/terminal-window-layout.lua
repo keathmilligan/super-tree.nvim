@@ -23,6 +23,19 @@ vim.cmd("edit " .. vim.fn.fnameescape(root .. "/editor.txt"))
 local editor_buffer = vim.api.nvim_get_current_buf()
 super_tree.open()
 local window = require("super-tree.window")
+
+local split_keys = { "<C-w>s", "<C-w>S", "<C-w><C-s>", "<C-w>v", "<C-w><C-v>" }
+for _, keys in ipairs(split_keys) do
+  local win_count = #vim.api.nvim_tabpage_list_wins(0)
+  vim.api.nvim_set_current_win(window.sidebar_win)
+  local input = vim.api.nvim_replace_termcodes(keys, true, false, true)
+  vim.api.nvim_feedkeys(input, "xt", false)
+  check(
+    #vim.api.nvim_tabpage_list_wins(0) == win_count,
+    keys .. " must not duplicate the tree"
+  )
+end
+
 vim.api.nvim_set_current_win(window.find_editor_win())
 vim.cmd("rightbelow vsplit")
 vim.cmd("enew")
