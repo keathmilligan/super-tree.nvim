@@ -43,49 +43,9 @@ local function run()
   check(hl.bold == true, "fade preserves bold")
   check(hl.bg == nil, "fade does not paint over the sidebar background")
 
-  local ns = vim.api.nvim_create_namespace("SuperTreeFadeTest")
-  local buf = vim.api.nvim_create_buf(false, true)
-  local lines = { "one", "two", "three", "four", "five", "six", "seven", "eight" }
-  vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
-  for i = 0, 7 do
-    vim.api.nvim_buf_set_extmark(buf, ns, i, 0, { end_col = #lines[i + 1], hl_group = "Directory" })
-  end
-  local virt_id = vim.api.nvim_buf_set_extmark(buf, ns, 7, 0, {
-    virt_text     = { { "X", "Directory" } },
-    virt_text_pos = "right_align",
-    hl_mode       = "combine",
-  })
-
-  fade.apply_factors(buf, { ns }, fade.visible_factors(1, 8, 8), { reset = true })
-  local overlays = vim.api.nvim_buf_get_extmarks(
-    buf, fade.overlay_ns(), { 7, 0 }, { 7, -1 }, { details = true }
-  )
-  local saw_quarter
-  for _, m in ipairs(overlays) do
-    if m[4].hl_group == quarter then saw_quarter = true end
-  end
-  check(saw_quarter, "last line overlay uses the 25% Directory group")
-
-  local virt = vim.api.nvim_buf_get_extmarks(buf, ns, { 7, 0 }, { 7, -1 }, { details = true })
-  local faded_virt
-  for _, m in ipairs(virt) do
-    if m[1] == virt_id and m[4].virt_text then
-      faded_virt = m[4].virt_text[1][2]
-    end
-  end
-  check(faded_virt == quarter, "right-aligned virt_text fades with the row")
-
-  fade.apply_factors(buf, { ns }, {}, {})
-  virt = vim.api.nvim_buf_get_extmarks(buf, ns, { 7, 0 }, { 7, -1 }, { details = true })
-  local restored
-  for _, m in ipairs(virt) do
-    if m[1] == virt_id and m[4].virt_text then
-      restored = m[4].virt_text[1][2]
-    end
-  end
-  check(restored == "Directory", "leaving the fade zone restores virt_text")
-  check(#vim.api.nvim_buf_get_extmarks(buf, fade.overlay_ns(), 0, -1, {}) == 0,
-    "leaving the fade zone clears overlays")
+  -- Rendering, scrolling, virtual text, and project restoration are verified
+  -- against the RGB screen cells in tests/fade-screen.py. Stored extmarks do
+  -- not prove that the viewport was actually drawn with the correct colors.
 end
 
 local ok, err = xpcall(run, debug.traceback)

@@ -34,6 +34,10 @@ SHALL preserve focus when the previously focused window remains valid.
 
 While SuperTree is open as a split (sidebar or pinned) and the user is not quitting Neovim, the tab SHALL keep at least one editor window beside the tree. SuperTree SHALL NOT expand to fill the tab as a result of closing a buffer.
 
+A terminal window beside SuperTree SHALL satisfy this layout invariant and
+SHALL prevent creation of a redundant editor split. A terminal window SHALL NOT
+be selected as the target for opening a file.
+
 Floating mode is an overlay, not a split; this invariant does not apply there.
 
 ### Buffer close
@@ -55,6 +59,18 @@ THEN SuperTree SHALL create a full-height editor beside the tree and restore the
 
 Closing SuperTree SHALL NOT raise `E444` even if it is the only window; an unnamed editor remains so Neovim still has a window.
 
+### Workspace state interoperability
+
+SuperTree SHALL provide public operations to capture and restore versioned,
+serializable workspace state. That state SHALL include tree root, open state,
+expanded paths, selected path, hidden-entry state, Buffers and Projects pane
+visibility and selections, sidebar width, and pane heights. Runtime window and
+buffer identifiers SHALL NOT be required to restore the state.
+
+SuperTree SHALL allow a named project provider to supply project listing,
+current-project identification, and project opening. An explicitly registered
+provider SHALL take precedence over optional fallback providers.
+
 ### Quitting the last editor
 
 Quitting the last editor window with `:q` / `:quit` SHALL still close SuperTree so Neovim can exit.
@@ -65,3 +81,4 @@ Quitting the last editor window with `:q` / `:quit` SHALL still close SuperTree 
 | --- | --- |
 | 2026-09-12 | Initial spec from preserve-editor-on-buffer-close |
 | 2026-09-18 | Added ordered dynamic Agents/Projects/Buffers pane layout |
+| 2026-09-18 | Added terminal-aware editor preservation and public workspace/project integration contracts |

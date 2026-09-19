@@ -17,12 +17,8 @@ local settings = {
 
 local overlay_ns = vim.api.nvim_create_namespace("SuperTreeFade")
 local cache = {}
-local panes = {}     -- win -> { buf, namespaces }
-local virt_orig = {} -- buf -> { { ns, id, row, col, chunks, pos, hl_mode }, ... }
-
-function M.overlay_ns()
-  return overlay_ns
-end
+local panes = {} -- buf -> { lines, marks (by row) }; always unfaded source data
+local provider_ready = false
 
 function M.clear_cache()
   cache = {}
@@ -132,137 +128,141 @@ local function fade_chunks(chunks, factor)
   return out
 end
 
-local function restore_virt(buf)
-  local saved = virt_orig[buf]
-  if not saved then return end
-  for _, item in ipairs(saved) do
-    pcall(vim.api.nvim_buf_set_extmark, buf, item.ns, item.row, item.col, {
-      id            = item.id,
-      virt_text     = item.chunks,
-      virt_text_pos = item.pos,
-      hl_mode       = item.hl_mode,
-    })
-  end
-  virt_orig[buf] = {}
-end
-
-local function win_for_buf(buf)
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(win) == buf then return win end
-  end
-end
-
-function M.apply_factors(buf, namespaces, factors, opts)
-  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
-  opts = opts or {}
-  if opts.reset then
-    virt_orig[buf] = {}
-  else
-    restore_virt(buf)
-  end
-  vim.api.nvim_buf_clear_namespace(buf, overlay_ns, 0, -1)
-  if not factors or not next(factors) then return end
-
-  local lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false)
-  for lnum0, factor in pairs(factors) do
-    local line = lines[lnum0 + 1]
-    local normal_hl = M.group("Normal", factor)
-    if line and #line > 0 and normal_hl ~= "Normal" then
-      vim.api.nvim_buf_set_extmark(buf, overlay_ns, lnum0, 0, {
-        end_col  = #line,
-        hl_group = normal_hl,
-        priority = 1,
-      })
-    end
-  end
-
-  for _, ns in ipairs(namespaces or {}) do
-    for lnum0, factor in pairs(factors) do
-      local marks = vim.api.nvim_buf_get_extmarks(
-        buf, ns, { lnum0, 0 }, { lnum0, -1 }, { details = true }
-      )
-      for _, m in ipairs(marks) do
-        local id, row, col, d = m[1], m[2], m[3], m[4]
-        if d.hl_group and d.end_col then
-          vim.api.nvim_buf_set_extmark(buf, overlay_ns, row, col, {
-            end_row  = d.end_row or row,
-            end_col  = d.end_col,
-            hl_group = M.group(d.hl_group, factor),
-            priority = (d.priority or 4096) + 200,
-          })
-        end
-        if d.virt_text then
-          virt_orig[buf] = virt_orig[buf] or {}
-          virt_orig[buf][#virt_orig[buf] + 1] = {
-            ns = ns, id = id, row = row, col = col,
-            chunks = d.virt_text,
-            pos = d.virt_text_pos or "right_align",
-            hl_mode = d.hl_mode or "combine",
-          }
-          pcall(vim.api.nvim_buf_set_extmark, buf, ns, row, col, {
-            id            = id,
-            virt_text     = fade_chunks(d.virt_text, factor),
-            virt_text_pos = d.virt_text_pos or "right_align",
-            hl_mode       = d.hl_mode or "combine",
-          })
-        end
+-- Prepare highlight definitions outside redraw callbacks. All factors are
+-- quantized to these levels by group(), including a fully dark bottom row.
+local function prepare_groups(pane)
+  local groups = { Normal = true }
+  for _, marks in pairs(pane.marks) do
+    for _, mark in ipairs(marks) do
+      local d = mark[4]
+      if d.hl_group then groups[d.hl_group] = true end
+      for _, chunk in ipairs(d.virt_text or {}) do
+        if type(chunk[2]) == "string" then groups[chunk[2]] = true end
       end
     end
   end
-end
-
-function M.apply(win, buf, namespaces, opts)
-  if not win or not vim.api.nvim_win_is_valid(win) then return end
-  local info = vim.fn.getwininfo(win)[1]
-  if not info then return end
-  M.apply_factors(buf, namespaces, M.visible_factors(info.topline, info.botline, info.height), opts)
-end
-
-function M.attach(buf, namespaces)
-  local win = win_for_buf(buf)
-  if not win then return end
-  panes[win] = { buf = buf, namespaces = namespaces }
-  M.apply(win, buf, namespaces, { reset = true })
-end
-
-function M.refresh_win(win)
-  win = tonumber(win)
-  if not win then return end
-  local pane = panes[win]
-  if not pane then return end
-  if not vim.api.nvim_win_is_valid(win) then
-    panes[win] = nil
-    return
+  for name in pairs(groups) do
+    for step = 0, 19 do M.group(name, step / 20) end
   end
-  M.apply(win, pane.buf, pane.namespaces)
+end
+
+local function draw_row(buf, pane, row, factor)
+  local line = pane.lines[row + 1]
+  if not line then return end
+  if factor and #line > 0 then
+    -- This covers plain filenames and folder glyphs as well as any other
+    -- text inheriting Normal. Semantic highlights below retain their colors.
+    vim.api.nvim_buf_set_extmark(buf, overlay_ns, row, 0, {
+      end_col = #line, hl_group = M.group("Normal", factor),
+      priority = 1, ephemeral = true,
+    })
+  end
+  for _, mark in ipairs(pane.marks[row] or {}) do
+    local col, d = mark[3], mark[4]
+    if factor and d.hl_group and d.end_col then
+      vim.api.nvim_buf_set_extmark(buf, overlay_ns, row, col, {
+        end_row = d.end_row or row, end_col = d.end_col,
+        hl_group = M.group(d.hl_group, factor),
+        priority = math.min(65535, (d.priority or 4096) + 200),
+        ephemeral = true,
+      })
+    end
+    if d.virt_text then
+      vim.api.nvim_buf_set_extmark(buf, overlay_ns, row, col, {
+        virt_text = fade_chunks(d.virt_text, factor),
+        virt_text_pos = d.virt_text_pos or "right_align",
+        hl_mode = d.hl_mode or "combine",
+        priority = d.priority,
+        ephemeral = true,
+      })
+    end
+  end
+end
+
+local function ensure_provider()
+  if provider_ready then return end
+  provider_ready = true
+  local views = {}
+  local previous = {}
+  vim.api.nvim_set_decoration_provider(overlay_ns, {
+    on_win = function(_, win, buf, top)
+      local pane = panes[buf]
+      if not pane then return false end
+      -- Use the viewport supplied by the redraw, not getwininfo().botline
+      -- captured before layout/cursor restoration. SuperTree panes don't wrap.
+      local height = vim.api.nvim_win_get_height(win)
+      local bottom = math.min(#pane.lines, top + height)
+      local last = previous[win]
+      if not last or last.buf ~= buf or last.top ~= top or last.height ~= height then
+        previous[win] = { buf = buf, top = top, height = height }
+        -- Neovim can scroll by copying already drawn screen rows. Their old
+        -- colors are no longer correct at the new screen position, so also
+        -- invalidate the reused rows, not just newly exposed bottom lines.
+        if vim.api.nvim__redraw then
+          vim.api.nvim__redraw({ win = win, range = { top, bottom } })
+        else
+          -- Neovim 0.8/0.9: an empty highlight range invalidates screen rows
+          -- without changing their appearance. Only this redraw marker is
+          -- persistent; all actual fade decorations remain window-local.
+          vim.api.nvim_buf_set_extmark(buf, overlay_ns, top, 0, {
+            id = 1, end_row = bottom, end_col = 0, hl_group = "SuperTreeFadeRedraw",
+          })
+        end
+      end
+      views[win] = M.visible_factors(top + 1, bottom, height)
+      return true
+    end,
+    on_line = function(_, win, buf, row)
+      draw_row(buf, panes[buf], row, views[win][row])
+    end,
+    on_end = function()
+      views = {}
+      for win in pairs(previous) do
+        if not vim.api.nvim_win_is_valid(win) then previous[win] = nil end
+      end
+    end,
+  })
+end
+
+-- Called after a pane has replaced its contents and rebuilt its source marks.
+-- Retain original colors; the viewport fade only exists for a single redraw.
+function M.attach(buf, namespaces)
+  if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
+  ensure_provider()
+  local pane = { lines = vim.api.nvim_buf_get_lines(buf, 0, -1, false), marks = {} }
+  for _, ns in ipairs(namespaces or {}) do
+    for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(buf, ns, 0, -1, { details = true })) do
+      local row, d = mark[2], mark[4]
+      pane.marks[row] = pane.marks[row] or {}
+      table.insert(pane.marks[row], mark)
+      -- Virtual text is drawn once, by the provider, even outside the fade
+      -- zone. Never rewrite it with faded colors or restore old extmark IDs.
+      if d.virt_text then vim.api.nvim_buf_del_extmark(buf, ns, mark[1]) end
+    end
+  end
+  panes[buf] = pane
+  prepare_groups(pane)
+  vim.api.nvim_buf_clear_namespace(buf, overlay_ns, 0, -1)
 end
 
 function M.refresh_all()
-  for win, pane in pairs(panes) do
-    if vim.api.nvim_win_is_valid(win) then
-      M.apply(win, pane.buf, pane.namespaces)
+  for buf, pane in pairs(panes) do
+    if vim.api.nvim_buf_is_valid(buf) then
+      prepare_groups(pane)
     else
-      panes[win] = nil
+      panes[buf] = nil
     end
   end
+  vim.cmd("redraw!")
 end
 
 function M.setup(augroup, opts)
   M.configure(opts)
-  vim.api.nvim_create_autocmd("WinScrolled", {
+  ensure_provider()
+  vim.api.nvim_create_autocmd("BufWipeout", {
     group = augroup,
-    callback = function()
-      for key in pairs(vim.v.event or {}) do
-        if key ~= "all" then M.refresh_win(key) end
-      end
-    end,
+    callback = function(args) panes[args.buf] = nil end,
   })
-  if vim.fn.exists("##WinResized") == 1 then
-    vim.api.nvim_create_autocmd("WinResized", {
-      group = augroup,
-      callback = M.refresh_all,
-    })
-  end
 end
 
 return M
