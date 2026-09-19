@@ -5,6 +5,7 @@ local icons       = require("super-tree.icons")
 local git         = require("super-tree.git")
 local diagnostics = require("super-tree.diagnostics")
 local fade        = require("super-tree.fade")
+local window      = require("super-tree.window")
 
 local M = {}
 
@@ -491,31 +492,6 @@ local function virt_text_width(chunks)
   return w
 end
 
-local function width_for_buf(buf)
-  for _, win in ipairs(vim.api.nvim_list_wins()) do
-    if vim.api.nvim_win_get_buf(win) == buf then
-      return vim.api.nvim_win_get_width(win)
-    end
-  end
-  return vim.o.columns
-end
-
-local function truncate_to_width(text, max_w)
-  if max_w <= 0 then return "", true end
-  if vim.fn.strdisplaywidth(text) <= max_w then return text, false end
-  local out, w = {}, 0
-  for i = 0, vim.fn.strchars(text) - 1 do
-    local ch = vim.fn.strcharpart(text, i, 1)
-    local cw = vim.fn.strdisplaywidth(ch)
-    if w + cw > max_w then
-      return table.concat(out), true
-    end
-    out[#out + 1] = ch
-    w = w + cw
-  end
-  return table.concat(out), false
-end
-
 local function chunks_width(chunks)
   if #chunks == 0 then return 0 end
   local w = #chunks - 1
@@ -530,35 +506,6 @@ local BRANCH_FADE = {
   "SuperTreeGitBranchFade2",
   "SuperTreeGitBranchFade3",
 }
-
-local NAME_FADE = {
-  "SuperTreeNameFade1",
-  "SuperTreeNameFade2",
-  "SuperTreeNameFade3",
-}
-
--- Dim the last up to 3 characters of `text` starting at byte `byte_start`.
-local function add_fade_marks(lnum, byte_start, text, git_hl, fade_groups)
-  fade_groups = fade_groups or BRANCH_FADE
-  local n = vim.fn.strchars(text)
-  local fade_n = math.min(3, n)
-  if fade_n == 0 then return end
-  local byte = byte_start
-  for i = 0, n - 1 do
-    local ch = vim.fn.strcharpart(text, i, 1)
-    local nextb = byte + #ch
-    local from_end = n - 1 - i
-    if from_end < fade_n then
-      table.insert(git_hl, {
-        line  = lnum,
-        start = byte,
-        end_  = nextb,
-        hl    = fade_groups[fade_n - from_end],
-      })
-    end
-    byte = nextb
-  end
-end
 
 -- Append left-hand status chunks to `line`, shrinking the branch name so the
 -- right-aligned git status still fits. Truncated names fade out on the last
@@ -576,7 +523,7 @@ local function append_fitted_left(line, chunks, lnum, git_hl, prefix_w, right_w,
     local rest_w = chunks_width(rest)
     if #rest > 0 then rest_w = rest_w + 1 end
     local branch_avail = avail - rest_w
-    local text, tr = truncate_to_width(chunks[1][1], math.max(branch_avail, 0))
+    local text, tr = fade.truncate_to_width(chunks[1][1], math.max(branch_avail, 0))
     truncated = tr
     chunks = { { text, chunks[1][2] } }
     for _, c in ipairs(rest) do
@@ -595,7 +542,7 @@ local function append_fitted_left(line, chunks, lnum, git_hl, prefix_w, right_w,
     line = line .. ch[1]
     table.insert(git_hl, { line = lnum, start = seg_start, end_ = #line, hl = ch[2] })
     if ci == 1 and truncated then
-      add_fade_marks(lnum, seg_start, ch[1], git_hl, BRANCH_FADE)
+      fade.add_right_fade(git_hl, lnum, seg_start, ch[1], BRANCH_FADE)
     end
   end
   return line
@@ -774,7 +721,7 @@ function M.render(sidebar_buf, config)
         cwd_st_prefix, left, 1, git_hl,
         vim.fn.strdisplaywidth(cwd_st_prefix),
         virt_text_width(right_vt),
-        width_for_buf(sidebar_buf)
+        window.width_for_buf(sidebar_buf)
       )
       table.insert(indent_hl, { line = 1, start = 0, end_ = #cwd_st_prefix })
       table.insert(lines, status_line)
@@ -846,7 +793,7 @@ function M.render(sidebar_buf, config)
             diag_w = vim.fn.strdisplaywidth(" " .. dchunk[1])
           end
         end
-        local win_w = width_for_buf(sidebar_buf)
+        local win_w = window.width_for_buf(sidebar_buf)
         if line_w + 1 + virt_text_width(with_branch) + diag_w <= win_w then
           for _, ch in ipairs(with_branch) do
             table.insert(vt_chunks, ch)
@@ -879,7 +826,7 @@ function M.render(sidebar_buf, config)
     -- Shrink the name so right-aligned status indicators do not overlap it.
     local display_name = entry.name
     local name_truncated = false
-    local win_w = width_for_buf(sidebar_buf)
+    local win_w = window.width_for_buf(sidebar_buf)
     local right_w = virt_text_width(vt_chunks)
     local head = prefix .. icon_with_space
     local avail = win_w - right_w - 1
@@ -888,7 +835,7 @@ function M.render(sidebar_buf, config)
     if vim.fn.strdisplaywidth(head .. display_name .. git_badge .. clean_badge) > avail then
       git_badge, clean_badge = "", ""
       if vim.fn.strdisplaywidth(head .. display_name) > avail then
-        display_name, name_truncated = truncate_to_width(entry.name, avail - head_w)
+        display_name, name_truncated = fade.truncate_to_width(entry.name, avail - head_w)
       end
     end
 
@@ -924,7 +871,7 @@ function M.render(sidebar_buf, config)
       table.insert(git_hl, { line = lnum, start = name_byte_start, end_ = name_byte_end, hl = name_status_hl })
     end
     if name_truncated and #display_name > 0 then
-      add_fade_marks(lnum, name_byte_start, display_name, git_hl, NAME_FADE)
+      fade.add_right_fade(git_hl, lnum, name_byte_start, display_name)
     end
 
     if #vt_chunks > 0 then
@@ -953,7 +900,7 @@ function M.render(sidebar_buf, config)
         st_prefix, left, st_lnum, git_hl,
         vim.fn.strdisplaywidth(st_prefix),
         virt_text_width(right_vt),
-        width_for_buf(sidebar_buf)
+        window.width_for_buf(sidebar_buf)
       )
       table.insert(lines, status_line)
       M.row_entry[#lines] = entry

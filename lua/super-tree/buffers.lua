@@ -93,8 +93,9 @@ function M.render(buf, config)
   end
 
   local lines = {}
-  local icon_hl, name_hl, virt_marks = {}, {}, {}
+  local icon_hl, name_hl, virt_marks, fade_marks = {}, {}, {}, {}
   local current = editor_bufnr()
+  local win_w = window.width_for_buf(buf)
 
   for i, entry in ipairs(M.entries) do
     local is_current = entry.bufnr == current
@@ -102,30 +103,51 @@ function M.render(buf, config)
     local icon_with_space = icon:match(" $") and icon or icon .. " "
     local extra = entry.modified and " +" or ""
     local prefix = is_current and " > " or "   "
-    table.insert(lines, prefix .. icon_with_space .. entry.name .. extra)
+
+    -- Right-aligned diagnostics shrink the space for the name, like the tree.
+    local dchunk
+    if config.diagnostics and config.diagnostics.enable ~= false then
+      dchunk = diagnostics.chunk(entry.path, false, config)
+    end
+    local right_w = dchunk and vim.fn.strdisplaywidth(" " .. dchunk[1]) or 0
+    local head = prefix .. icon_with_space
+    local head_w = vim.fn.strdisplaywidth(head)
+    local avail = win_w - right_w - 1
+    if avail < head_w then avail = head_w end
+
+    local display_name, name_truncated = entry.name, false
+    if vim.fn.strdisplaywidth(head .. display_name .. extra) > avail then
+      extra = ""
+      if vim.fn.strdisplaywidth(head .. display_name) > avail then
+        display_name, name_truncated = fade.truncate_to_width(entry.name, avail - head_w)
+      end
+    end
+    table.insert(lines, head .. display_name .. extra)
 
     local lnum = i - 1
     local icon_start = #prefix
     local icon_end = icon_start + #icon
     local name_start = #prefix + #icon_with_space
-    local name_end = name_start + #entry.name
+    local name_end = name_start + #display_name
 
     if entry.icon_hl then
       table.insert(icon_hl, { line = lnum, start = icon_start, end_ = icon_end, hl = entry.icon_hl })
     end
-    table.insert(name_hl, {
-      line = lnum, start = name_start, end_ = name_end,
-      hl = is_current and "SuperTreeBuffersCurrent" or "SuperTreeDirectory",
-    })
+    if name_end > name_start then
+      table.insert(name_hl, {
+        line = lnum, start = name_start, end_ = name_end,
+        hl = is_current and "SuperTreeBuffersCurrent" or "SuperTreeDirectory",
+      })
+    end
     if extra ~= "" then
       table.insert(name_hl, { line = lnum, start = name_end, end_ = name_end + #extra, hl = "SuperTreeGitModified" })
     end
+    if name_truncated and #display_name > 0 then
+      fade.add_right_fade(fade_marks, lnum, name_start, display_name)
+    end
 
-    if config.diagnostics and config.diagnostics.enable ~= false then
-      local chunk = diagnostics.chunk(entry.path, false, config)
-      if chunk then
-        table.insert(virt_marks, { line = lnum, chunks = { { " " .. chunk[1], chunk[2] } } })
-      end
+    if dchunk then
+      table.insert(virt_marks, { line = lnum, chunks = { { " " .. dchunk[1], dchunk[2] } } })
     end
   end
 
@@ -146,6 +168,12 @@ function M.render(buf, config)
     vim.api.nvim_buf_set_extmark(buf, ns, pos.line, pos.start, {
       end_col  = pos.end_,
       hl_group = pos.hl,
+    })
+  end
+  for _, mark in ipairs(fade_marks) do
+    vim.api.nvim_buf_set_extmark(buf, ns, mark.line, mark.start, {
+      end_col  = mark.end_,
+      hl_group = mark.hl,
     })
   end
   for _, mark in ipairs(virt_marks) do

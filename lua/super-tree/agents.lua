@@ -197,20 +197,32 @@ function M.render(buf)
   M.entries = filter.filter_entries(M.all, M.search_pattern, M.use_fzy)
   M.row_map = {}
 
+  -- Keep a cell clear at the right edge, like the tree; over-wide rows fade
+  -- out over their last three characters.
+  local avail = window.width_for_buf(buf) - 1
   local lines = {}
   local marks = {}
+  local fade_marks = {}
   local status_symbols = symbols()
   for index, entry in ipairs(M.entries) do
     local key = status_key(entry.status)
     local icon = status_symbols[entry.status] or status_symbols[key] or status_symbols.unknown
     local status = entry.status or "unknown"
-    local row1 = " " .. icon .. " " .. status .. "  " .. (entry.project or "unknown project")
-    local row2 = "   " .. (entry.description or entry.title or "OpenCode session")
-    local row3 = "   " .. model_line(entry)
+    local rows = {
+      " " .. icon .. " " .. status .. "  " .. (entry.project or "unknown project"),
+      "   " .. (entry.description or entry.title or "OpenCode session"),
+      "   " .. model_line(entry),
+    }
     local first = #lines + 1
-    lines[#lines + 1] = row1
-    lines[#lines + 1] = row2
-    lines[#lines + 1] = row3
+    for r = 1, 3 do
+      local row = rows[r]
+      if vim.fn.strdisplaywidth(row) > avail then
+        row = fade.truncate_to_width(row, avail)
+        fade.add_right_fade(fade_marks, first + r - 2, 0, row)
+      end
+      lines[#lines + 1] = row
+    end
+    local row1, row3 = lines[first], lines[first + 2]
     M.row_map[first] = entry
     M.row_map[first + 1] = entry
     M.row_map[first + 2] = entry
@@ -218,20 +230,26 @@ function M.render(buf)
     local icon_start = 1
     local icon_end = icon_start + #icon
     local status_start = icon_end + 1
-    local status_end = status_start + #status
-    local project_start = status_end + 2
-    marks[#marks + 1] = {
-      row = first - 1, start = icon_start, finish = status_end,
-      hl = STATUS_HIGHLIGHTS[key],
-    }
-    marks[#marks + 1] = {
-      row = first - 1, start = project_start, finish = #row1,
-      hl = "SuperTreeDirectory",
-    }
-    marks[#marks + 1] = {
-      row = first + 1, start = 3, finish = #row3,
-      hl = "SuperTreeNameFade1",
-    }
+    local status_end = math.min(status_start + #status, #row1)
+    local project_start = status_start + #status + 2
+    if status_end > icon_start then
+      marks[#marks + 1] = {
+        row = first - 1, start = icon_start, finish = status_end,
+        hl = STATUS_HIGHLIGHTS[key],
+      }
+    end
+    if #row1 > project_start then
+      marks[#marks + 1] = {
+        row = first - 1, start = project_start, finish = #row1,
+        hl = "SuperTreeDirectory",
+      }
+    end
+    if #row3 > 3 then
+      marks[#marks + 1] = {
+        row = first + 1, start = 3, finish = #row3,
+        hl = "SuperTreeNameFade1",
+      }
+    end
   end
   if #lines == 0 then lines = { "" } end
 
@@ -242,6 +260,12 @@ function M.render(buf)
   for _, mark in ipairs(marks) do
     vim.api.nvim_buf_set_extmark(buf, ns, mark.row, mark.start, {
       end_col = mark.finish,
+      hl_group = mark.hl,
+    })
+  end
+  for _, mark in ipairs(fade_marks) do
+    vim.api.nvim_buf_set_extmark(buf, ns, mark.line, mark.start, {
+      end_col = mark.end_,
       hl_group = mark.hl,
     })
   end

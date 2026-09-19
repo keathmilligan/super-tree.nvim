@@ -1,6 +1,9 @@
 -- Viewport fade: darken the bottom of the pane (window height), not the last
 -- items in the list. A short list in a tall pane is unaffected. Tuned by
 -- `fade.zone` and `fade.bottom_opacity` in plugin setup.
+--
+-- This module also owns the right-edge fadeout shared by all panes: text
+-- truncated at the pane's right edge dims over its last three characters.
 local M = {}
 
 local defaults = {
@@ -22,6 +25,56 @@ local provider_ready = false
 
 function M.clear_cache()
   cache = {}
+end
+
+-- Highlight groups for the right-edge fadeout, from least to most faded.
+M.NAME_FADE = {
+  "SuperTreeNameFade1",
+  "SuperTreeNameFade2",
+  "SuperTreeNameFade3",
+}
+
+-- Truncate `text` to `max_w` display cells. Returns the (possibly shortened)
+-- text and whether truncation happened.
+function M.truncate_to_width(text, max_w)
+  if max_w <= 0 then return "", true end
+  if vim.fn.strdisplaywidth(text) <= max_w then return text, false end
+  local out, w = {}, 0
+  for i = 0, vim.fn.strchars(text) - 1 do
+    local ch = vim.fn.strcharpart(text, i, 1)
+    local cw = vim.fn.strdisplaywidth(ch)
+    if w + cw > max_w then
+      return table.concat(out), true
+    end
+    out[#out + 1] = ch
+    w = w + cw
+  end
+  return table.concat(out), false
+end
+
+-- Append right-edge fadeout marks dimming the last up to 3 characters of
+-- `text`, which starts at byte `byte_start` on line `lnum`. Set these marks
+-- after a line's base highlights so they take precedence on the overlap.
+function M.add_right_fade(marks, lnum, byte_start, text, fade_groups)
+  fade_groups = fade_groups or M.NAME_FADE
+  local n = vim.fn.strchars(text)
+  local fade_n = math.min(3, n)
+  if fade_n == 0 then return end
+  local byte = byte_start
+  for i = 0, n - 1 do
+    local ch = vim.fn.strcharpart(text, i, 1)
+    local nextb = byte + #ch
+    local from_end = n - 1 - i
+    if from_end < fade_n then
+      table.insert(marks, {
+        line  = lnum,
+        start = byte,
+        end_  = nextb,
+        hl    = fade_groups[fade_n - from_end],
+      })
+    end
+    byte = nextb
+  end
 end
 
 function M.configure(opts)

@@ -464,6 +464,18 @@ function M.is_plugin_win(win)
   return false
 end
 
+-- Text width available to the pane showing `buf`. Pane windows have no
+-- number/sign/fold columns, so the window width is the text width. Falls
+-- back to the full screen width when the buffer is not displayed.
+function M.width_for_buf(buf)
+  for _, win in ipairs(vim.api.nvim_list_wins()) do
+    if vim.api.nvim_win_get_buf(win) == buf then
+      return vim.api.nvim_win_get_width(win)
+    end
+  end
+  return vim.o.columns
+end
+
 function M.create_pinned_window(buf, width)
   M.sidebar_width = width
   vim.cmd("topleft vertical split")

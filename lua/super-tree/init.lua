@@ -133,6 +133,12 @@ local function render_buffers()
   end
 end
 
+local function render_projects()
+  if window.projects_buf and vim.api.nvim_buf_is_valid(window.projects_buf) then
+    projects.render(window.projects_buf)
+  end
+end
+
 -- Rebuild the tree data and re-render the sidebar (and buffers pane).
 local function rebuild()
   diagnostics.refresh()
@@ -514,11 +520,7 @@ filter.set_callbacks({
   move_down        = move_down,
   render_agents    = render_agents,
   render_buffers   = render_buffers,
-  render_projects  = function()
-    if window.projects_buf and vim.api.nvim_buf_is_valid(window.projects_buf) then
-      projects.render(window.projects_buf)
-    end
-  end,
+  render_projects  = render_projects,
   activate         = function(target)
     local acts = sidebar_actions()
     if target == "agents" then
@@ -1059,11 +1061,15 @@ function M.setup(opts)
   })
 
   -- Re-render when the sidebar width changes so repo branch names can
-  -- hide/show instead of overlapping the path.
+  -- hide/show instead of overlapping the path, and so every pane's
+  -- right-edge fadeout tracks the new width.
   local function rerender_on_resize()
     if window.is_open() then
       window.layout_floating_panes()
       tree.render(window.sidebar_buf, config)
+      render_projects()
+      render_agents()
+      render_buffers()
     end
   end
   vim.api.nvim_create_autocmd("VimResized", {

@@ -199,23 +199,45 @@ function M.render(buf)
   local source = M.all or M.entries
   local active = active_entry(source)
   M.entries = filter.filter_entries(source, M.search_pattern, M.use_fzy)
+  -- Keep a cell clear at the right edge, like the tree; over-wide lines fade
+  -- out over their last three characters.
+  local avail = window.width_for_buf(buf) - 1
   local lines = {}
-  for _, entry in ipairs(M.entries) do
-    lines[#lines + 1] = (entry == active and " > " or "   ") .. entry.name
+  local truncated = {}
+  for i, entry in ipairs(M.entries) do
+    local line = (entry == active and " > " or "   ") .. entry.name
       .. "  " .. vim.fn.fnamemodify(entry.path, ":~")
+    if vim.fn.strdisplaywidth(line) > avail then
+      line, truncated[i] = fade.truncate_to_width(line, avail)
+    end
+    lines[#lines + 1] = line
   end
   if #lines == 0 then lines = { "" } end
   vim.bo[buf].modifiable = true
   vim.bo[buf].readonly = false
   vim.api.nvim_buf_set_lines(buf, 0, -1, false, lines)
   vim.api.nvim_buf_clear_namespace(buf, ns, 0, -1)
+  local fade_marks = {}
   for i, entry in ipairs(M.entries) do
-    vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 3, {
-      end_col = 3 + #entry.name,
-      hl_group = entry == active and "SuperTreeProjectsCurrent" or "SuperTreeDirectory",
-    })
-    vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 3 + #entry.name, {
-      end_col = #lines[i], hl_group = "SuperTreeNameFade1",
+    local name_end = math.min(3 + #entry.name, #lines[i])
+    if name_end > 3 then
+      vim.api.nvim_buf_set_extmark(buf, ns, i - 1, 3, {
+        end_col = name_end,
+        hl_group = entry == active and "SuperTreeProjectsCurrent" or "SuperTreeDirectory",
+      })
+    end
+    if name_end < #lines[i] then
+      vim.api.nvim_buf_set_extmark(buf, ns, i - 1, name_end, {
+        end_col = #lines[i], hl_group = "SuperTreeNameFade1",
+      })
+    end
+    if truncated[i] then
+      fade.add_right_fade(fade_marks, i - 1, 0, lines[i])
+    end
+  end
+  for _, mark in ipairs(fade_marks) do
+    vim.api.nvim_buf_set_extmark(buf, ns, mark.line, mark.start, {
+      end_col = mark.end_, hl_group = mark.hl,
     })
   end
   vim.bo[buf].modifiable = false
