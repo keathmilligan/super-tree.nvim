@@ -14,8 +14,63 @@ M.projects_buf = nil
 M.projects_win = nil
 M.agents_buf = nil
 M.agents_win = nil
-local pane_order = { "agents", "projects", "buffers" }
-local pane_heights = { agents = 10, projects = 10, buffers = 10 }
+-- Optional panes stacked above the file tree, top to bottom. The file tree is
+-- always the last, flexible pane. Override the order with `pane_order` in
+-- setup().
+local OPTIONAL_PANES = { "projects", "agents", "buffers" }
+local pane_order = { "projects", "agents", "buffers" }
+local pane_heights = { agents = 15, projects = 10, buffers = 10 }
+local PANE_SET = {}
+for _, name in ipairs(OPTIONAL_PANES) do PANE_SET[name] = true end
+
+-- Normalize a configured pane order into a complete permutation of the
+-- optional panes: unknown or duplicate entries are dropped, "tree" is honored
+-- only as the final entry, and panes missing from the list are appended in the
+-- default order. Returns the order and an optional warning message.
+local function normalize_pane_order(order)
+  if type(order) ~= "table" then
+    return vim.deepcopy(OPTIONAL_PANES),
+      "pane_order must be a list of pane names; using the default order"
+  end
+  local seen, ignored, result = {}, {}, {}
+  for index, name in ipairs(order) do
+    if name == "tree" then
+      if index ~= #order then
+        ignored[#ignored + 1] = '"tree" (the file tree is always last)'
+      end
+    elseif not PANE_SET[name] then
+      ignored[#ignored + 1] = tostring(name)
+    elseif seen[name] then
+      ignored[#ignored + 1] = tostring(name) .. " (duplicate)"
+    else
+      seen[name] = true
+      result[#result + 1] = name
+    end
+  end
+  for _, name in ipairs(OPTIONAL_PANES) do
+    if not seen[name] then result[#result + 1] = name end
+  end
+  if #ignored > 0 then
+    return result, "ignoring pane_order entries: " .. table.concat(ignored, ", ")
+  end
+  return result
+end
+
+-- Set the top-to-bottom order of the optional panes above the file tree.
+-- Floating panes relayout immediately; split panes take the new order as they
+-- open or close.
+function M.set_pane_order(order)
+  local normalized, warning = normalize_pane_order(order)
+  pane_order = normalized
+  if warning then
+    vim.notify("SuperTree: " .. warning, vim.log.levels.WARN)
+  end
+  M.layout_floating_panes()
+end
+
+function M.get_pane_order()
+  return vim.deepcopy(pane_order)
+end
 
 local function valid_pane_win(pane)
   local win = M[pane .. "_win"]
@@ -216,8 +271,9 @@ local function create_pane_buffer(pane)
   return M[key]
 end
 
--- All floating panes share one column, in Agents / Projects / Buffers / Tree order.
--- Recompute together so toggling either pane cannot overlap the other.
+-- All floating panes share one column in the configured pane order, with the
+-- tree at the bottom. Recompute together so toggling a pane cannot overlap
+-- another.
 function M.layout_floating_panes()
   if not M.is_open() then return end
   local cfg = vim.api.nvim_win_get_config(M.sidebar_win)
@@ -249,6 +305,10 @@ function M.layout_floating_panes()
 end
 
 -- Panes are real, independently scrollable/resizable windows in split modes.
+-- The split anchor for a pane is the first open pane below it in the configured
+-- order, or the tree when none is open: `aboveleft split` then inserts the new
+-- pane directly above that anchor, which holds for any order and any sequence
+-- in which panes appear.
 local function lower_pane_anchor(pane)
   local found = false
   for _, candidate in ipairs(pane_order) do

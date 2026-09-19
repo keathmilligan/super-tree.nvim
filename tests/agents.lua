@@ -350,7 +350,7 @@ local function run()
 
   -- Dynamic pane ordering and configured heights in all window modes.
   local function check_layout(mode)
-    local wins = { window.agents_win, window.projects_win, window.buffers_win, window.sidebar_win }
+    local wins = { window.projects_win, window.agents_win, window.buffers_win, window.sidebar_win }
     local previous_bottom = -1
     for _, win in ipairs(wins) do
       check(win and vim.api.nvim_win_is_valid(win), mode .. " has every pane")

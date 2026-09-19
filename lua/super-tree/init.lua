@@ -20,6 +20,11 @@ local config      = {
   --             files are opened, never covers other windows, navigable
   --             like a regular window; only q closes it
   mode                            = "sidebar",
+  -- Top-to-bottom order of the optional panes above the file tree. The tree is
+  -- always the last, flexible pane and is not part of this list. Invalid or
+  -- duplicate entries are ignored; missing panes are appended in the default
+  -- order.
+  pane_order                      = { "projects", "agents", "buffers" },
   icons                           = {
     enable   = true,
     provider = "auto", -- "auto", "nvim-web-devicons", or "builtin"
@@ -39,15 +44,16 @@ local config      = {
     search_limit = 50,
     find_by_full_path_words = false,
   },
-  -- Projects discovered by neovim-project, above the buffers pane.
+  -- Projects discovered by project providers, at the top of the pane stack.
   projects                        = {
     enable = true,
     height = 10,
   },
-  -- Live coding-agent instances above Projects. OpenCode V2 is the first provider.
+  -- Live coding-agent instances between Projects and Buffers. OpenCode V2 is
+  -- the first provider.
   agents                          = {
     enable = true,
-    height = 10,
+    height = 15, -- five three-row entries
     refresh_interval = 2000,
     command = "opencode2",
     symbols = {
@@ -59,7 +65,7 @@ local config      = {
       unknown = "?",
     },
   },
-  -- Open-buffers pane above the file tree (`B` to toggle).
+  -- Open-buffers pane directly above the file tree (`B` to toggle).
   buffers                         = {
     enable = true,
     height = 10,
@@ -839,7 +845,16 @@ end
 
 function M.setup(opts)
   agents.stop()
-  config = vim.tbl_deep_extend("force", config, opts or {})
+  opts = opts or {}
+  local pane_order = opts.pane_order
+  config = vim.tbl_deep_extend("force", config, opts)
+  -- pane_order is a sequence: assign it directly because tbl_deep_extend
+  -- would merge lists positionally (a partial list would corrupt the
+  -- existing order).
+  if pane_order ~= nil then
+    config.pane_order = pane_order
+  end
+  window.set_pane_order(config.pane_order)
   window.open_files_do_not_replace_types = config.open_files_do_not_replace_types
   window.sidebar_width = config.width
   agents.configure(config.agents, function()

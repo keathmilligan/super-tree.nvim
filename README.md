@@ -12,9 +12,10 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 - Follows the current file; `.` / `<BS>` change the tree root
 - Three display modes: floating popup, pinned split, or persistent sidebar
 - Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, ahead/behind, stash, lines added/removed)
+- Projects pane at the top of the pane stack when [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) or [neovim-project](https://github.com/coffebar/neovim-project) has projects available; select a project to switch workspaces
+- Agents pane below Projects for working, blocked, questioning, done, and idle OpenCode V2 TUI instances, with colored status, project, description, agent/model details, and Super Project activation
 - Buffers pane above the tree (independently scrollable and resizable; `B` to toggle)
-- Projects pane above Buffers when [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) or [neovim-project](https://github.com/coffebar/neovim-project) has projects available; select a project to switch workspaces
-- Agents pane above Projects for working, blocked, questioning, done, and idle OpenCode V2 TUI instances, with colored status, project, description, agent/model details, and Super Project activation
+- Configurable top-to-bottom pane order (`pane_order`)
 - LSP diagnostic icons on files and directories (bubbled to parents)
 - Background git refresh via filesystem watchers
 
@@ -114,6 +115,7 @@ Neo-tree filesystem defaults where practical. Editing keys are disabled.
 require("super-tree").setup({
   width = 50,
   mode = "sidebar", -- "floating", "pinned", or "sidebar"
+  pane_order = { "projects", "agents", "buffers" }, -- top to bottom; tree is always last
   icons = {
     enable = true,
     provider = "auto", -- "auto", "nvim-web-devicons", or "builtin"
@@ -134,7 +136,7 @@ require("super-tree").setup({
   },
   agents = {
     enable = true, -- automatically shown while OpenCode V2 has live TUIs or agents
-    height = 10,
+    height = 15, -- fits five three-row entries
     refresh_interval = 2000, -- milliseconds
     command = "opencode2",
     symbols = {
@@ -177,9 +179,19 @@ require("super-tree").setup({
 })
 ```
 
+### Pane order
+
+Optional panes stack in `pane_order`, top to bottom, above the file tree:
+
+```lua
+pane_order = { "projects", "agents", "buffers" }, -- default
+```
+
+The file tree is always the last, flexible pane and cannot be moved. Any optional pane omitted from the list is appended in the default order, and unknown or duplicate entries are ignored with a warning. The setting controls order only; which panes are visible is still driven by their data (Buffers by `B`, Projects by available projects, Agents by live agents).
+
 ### Agents
 
-Automatically appears above Projects while at least one full OpenCode V2 TUI process or unmatched active session exists. SuperTree asynchronously detects current-user `opencode2` TUI processes, excluding the background service and non-TUI commands, and reconciles them with `GET /api/session/active`. Active sessions show `blocked` while awaiting permission, `question` while awaiting an interactive question/form response, and otherwise show `working`. A newly detected TUI without an active agent is `idle`; after a known active task finishes, it becomes `done` and retains the task metadata until new work starts or the TUI exits. Active sessions without a matching TUI also remain visible. Historical sessions without a live TUI are not shown.
+Automatically appears in its configured position while at least one full OpenCode V2 TUI process or unmatched active session exists (below Projects and above Buffers with the default `pane_order`). SuperTree asynchronously detects current-user `opencode2` TUI processes, excluding the background service and non-TUI commands, and reconciles them with `GET /api/session/active`. Active sessions show `blocked` while awaiting permission, `question` while awaiting an interactive question/form response, and otherwise show `working`. A newly detected TUI without an active agent is `idle`; after a known active task finishes, it becomes `done` and retains the task metadata until new work starts or the TUI exits. Active sessions without a matching TUI also remain visible. Historical sessions without a live TUI are not shown.
 
 Discovery polls every two seconds by default and hides the pane only when a successful snapshot contains neither a TUI nor an active session. `R` refreshes immediately. Linux uses `/proc` for each TUI's working directory; systems without `/proc` fall back to `lsof` when available.
 
@@ -191,15 +203,15 @@ Each agent is a three-row entry:
 
 `j` / `k` and the arrows move by agent rather than by display row. `<Enter>`, double-click, `l`, or `<Right>` on any of the three rows activates the workspace through super-project.nvim. If the OpenCode location is nested, SuperTree selects the longest registered project root containing it. Without Super Project, the pane remains usable but activation reports an error without changing the current workspace. `/` filters across status, project, description, agent, model, and path.
 
-Set `agents.enable = false` to disable the provider, `agents.height` to change its initial height, `agents.refresh_interval` to change polling frequency, or `agents.command` to use an explicit OpenCode V2 executable path. Status symbols are configurable under `agents.symbols`; unknown future status values remain visible with neutral styling.
+Set `agents.enable = false` to disable the provider, `agents.height` to change its initial height (default 15, which fits five three-row entries), `agents.refresh_interval` to change polling frequency, or `agents.command` to use an explicit OpenCode V2 executable path. Status symbols are configurable under `agents.symbols`; unknown future status values remain visible with neutral styling.
 
 ### Projects
 
-Automatically appears above Buffers (or above the tree when Buffers is hidden) when a supported project provider discovers projects. [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) registers its native provider automatically; neovim-project remains the fallback. Projects are sorted by last use with the current project first. Missing directories are omitted; `R` refreshes the list.
+Automatically appears when a supported project provider discovers projects, at its position in `pane_order` (top of the stack by default). [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) registers its native provider automatically; neovim-project remains the fallback. Projects are sorted by last use with the current project first. Missing directories are omitted; `R` refreshes the list.
 
 `<Enter>`, double-click, or `l` switches through the active provider. With super-project.nvim, SuperTree's root, visibility, expanded directories, selection, hidden-entry state, and pane dimensions are restored per workspace. The active project is marked with `>`; paths distinguish projects with the same name. `/` live-filters the list by name or path. Navigate between panes with `<C-w>k` / `<C-w>j`, and resize split panes with `<C-w>+/-` or the mouse.
 
-Set `projects.enable = false` to disable, or `projects.height` to change the initial height (default 20). Without a provider or available projects, the pane stays hidden.
+Set `projects.enable = false` to disable, or `projects.height` to change the initial height (default 10). Without a provider or available projects, the pane stays hidden.
 
 ### Project provider and state API
 
@@ -218,7 +230,7 @@ require("super-tree").register_project_provider("my-projects", {
 
 ### Buffers
 
-On by default (`buffers.enable = false` to disable). Press `B` to toggle. The pane is a real window above the tree (`<C-w>k` / `<C-w>j` to move, resize with `<C-w>+/-` or the mouse). The current buffer is marked with `>` and highlighted like the active project. `/` live-filters the list by name or path. `<Enter>` opens, `d` deletes the buffer (the editor window stays and shows the most recently used buffer, or a new unnamed buffer if none remain).
+On by default (`buffers.enable = false` to disable). Press `B` to toggle. The pane is a real window directly above the tree (`<C-w>k` / `<C-w>j` to move, resize with `<C-w>+/-` or the mouse). The current buffer is marked with `>` and highlighted like the active project. `/` live-filters the list by name or path. `<Enter>` opens, `d` deletes the buffer (the editor window stays and shows the most recently used buffer, or a new unnamed buffer if none remain).
 
 ### Fade
 
