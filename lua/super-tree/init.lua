@@ -6,6 +6,7 @@ local actions     = require("super-tree.actions")
 local filter      = require("super-tree.filter")
 local buffers     = require("super-tree.buffers")
 local projects    = require("super-tree.projects")
+local agents      = require("super-tree.agents")
 local diagnostics = require("super-tree.diagnostics")
 local fade        = require("super-tree.fade")
 
@@ -42,6 +43,18 @@ local config      = {
   projects                        = {
     enable = true,
     height = 10,
+  },
+  -- Running coding agents above Projects. OpenCode V2 is the first provider.
+  agents                          = {
+    enable = true,
+    height = 10,
+    refresh_interval = 2000,
+    command = "opencode2",
+    symbols = {
+      running = "●",
+      idle = "○",
+      unknown = "?",
+    },
   },
   -- Open-buffers pane above the file tree (`B` to toggle).
   buffers                         = {
@@ -96,6 +109,13 @@ local config      = {
 }
 
 local refresh_projects
+local refresh_agents
+
+local function render_agents()
+  if window.agents_buf and vim.api.nvim_buf_is_valid(window.agents_buf) then
+    agents.render(window.agents_buf)
+  end
+end
 
 local function render_buffers()
   if window.buffers_visible and window.buffers_buf
@@ -321,6 +341,7 @@ local function sidebar_actions()
     refresh                = function()
       git.clear_negative_cache()
       refresh_projects()
+      agents.refresh(true, true)
       rebuild()
       git.refresh_all()
     end,
@@ -340,7 +361,9 @@ local function sidebar_actions()
     end,
     clear_filter           = function()
       local win = vim.api.nvim_get_current_win()
-      if win == window.projects_win then
+      if win == window.agents_win then
+        filter.clear("agents")
+      elseif win == window.projects_win then
         filter.clear("projects")
       elseif win == window.buffers_win then
         filter.clear("buffers")
@@ -380,6 +403,20 @@ local function sidebar_actions()
           vim.notify("Could not switch project: " .. tostring(err), vim.log.levels.ERROR)
         end
       end)
+    end,
+    agent_up               = function() agents.move(-1) end,
+    agent_down             = function() agents.move(1) end,
+    activate_agent         = function()
+      local entry = agents.entry_at_cursor()
+      if not entry then return end
+      if not entry.directory then
+        vim.notify("OpenCode agent has no project directory: " .. entry.title, vim.log.levels.WARN)
+        return
+      end
+      local switched, err = projects.open_path(entry.directory)
+      if not switched then
+        vim.notify("Could not activate agent project: " .. tostring(err), vim.log.levels.ERROR)
+      end
     end,
     open_buffer            = function()
       local e = buffers.entry_at_cursor()
@@ -421,6 +458,22 @@ local function sidebar_actions()
   }
 end
 
+refresh_agents = function()
+  if not window.is_open() then return end
+  if not config.agents.enable or #agents.all == 0 then
+    filter.close_if_target("agents")
+    agents.search_pattern = nil
+    agents.use_fzy = false
+    window.close_agents_window()
+    return
+  end
+  local buf = window.open_agents_window(config.agents.height)
+  if buf then
+    agents.render(buf)
+    window.setup_agents_keymaps(buf, sidebar_actions(), { esc_closes = config.mode ~= "sidebar" })
+  end
+end
+
 refresh_projects = function()
   if not window.is_open() then return end
   local selected = projects.entry_at_cursor()
@@ -450,6 +503,7 @@ filter.set_callbacks({
   open_current     = toggle_expand,
   move_up          = move_up,
   move_down        = move_down,
+  render_agents    = render_agents,
   render_buffers   = render_buffers,
   render_projects  = function()
     if window.projects_buf and vim.api.nvim_buf_is_valid(window.projects_buf) then
@@ -458,7 +512,9 @@ filter.set_callbacks({
   end,
   activate         = function(target)
     local acts = sidebar_actions()
-    if target == "projects" then
+    if target == "agents" then
+      acts.activate_agent()
+    elseif target == "projects" then
       acts.switch_project()
     elseif target == "buffers" then
       acts.open_buffer()
@@ -497,6 +553,10 @@ function M.open()
     M.toggle_buffers()
   end
   refresh_projects()
+  if config.agents.enable then
+    refresh_agents() -- show the last valid snapshot while the async refresh starts
+    agents.start()
+  end
 
   if is_split then
     vim.bo[buf].filetype = "SuperTree"
@@ -523,6 +583,7 @@ end
 
 function M.close()
   filter.close_input(false)
+  agents.stop()
   window.close_window()
   git.reset()
 end
@@ -551,7 +612,8 @@ function M.capture_state()
   table.sort(expanded)
 
   local current = vim.api.nvim_get_current_win()
-  local focused = window.projects_win == current and "projects"
+  local focused = window.agents_win == current and "agents"
+    or window.projects_win == current and "projects"
     or window.buffers_win == current and "buffers"
     or window.sidebar_win == current and "tree"
     or "editor"
@@ -566,6 +628,7 @@ function M.capture_state()
     projects_visible = window.projects_win ~= nil and vim.api.nvim_win_is_valid(window.projects_win),
     selected_buffer = selected_path(window.buffers_win, buffers.entry_at_cursor, "path"),
     selected_project = selected_path(window.projects_win, projects.entry_at_cursor, "root"),
+    selected_agent = selected_path(window.agents_win, agents.entry_at_cursor, "id"),
     focused_pane = focused,
     sidebar_width = M.is_open() and vim.api.nvim_win_get_width(window.sidebar_win) or config.width,
     pane_heights = window.get_pane_heights(),
@@ -589,6 +652,8 @@ function M.restore_state(state)
   end
   filter.close_input(false)
   tree.search_pattern = nil
+  agents.search_pattern = nil
+  agents.use_fzy = false
   buffers.search_pattern = nil
   projects.search_pattern = nil
   tree.expanded_paths = {}
@@ -614,9 +679,12 @@ function M.restore_state(state)
   if state.selected_path then M.reveal(state.selected_path) end
   restore_list_cursor(window.buffers_win, buffers.entries, "path", state.selected_buffer)
   restore_list_cursor(window.projects_win, projects.entries, "root", state.selected_project)
+  agents.set_cursor_by_id(state.selected_agent)
 
   local focus = state.focused_pane
-  if focus == "projects" and window.projects_win and vim.api.nvim_win_is_valid(window.projects_win) then
+  if focus == "agents" and window.agents_win and vim.api.nvim_win_is_valid(window.agents_win) then
+    vim.api.nvim_set_current_win(window.agents_win)
+  elseif focus == "projects" and window.projects_win and vim.api.nvim_win_is_valid(window.projects_win) then
     vim.api.nvim_set_current_win(window.projects_win)
   elseif focus == "buffers" and window.buffers_win and vim.api.nvim_win_is_valid(window.buffers_win) then
     vim.api.nvim_set_current_win(window.buffers_win)
@@ -746,6 +814,12 @@ local function define_highlights()
   vim.api.nvim_set_hl(0, "SuperTreeDiagnosticWarn", { link = "DiagnosticWarn", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeDiagnosticInfo", { link = "DiagnosticInfo", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeDiagnosticHint", { link = "DiagnosticHint", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentRunning", { fg = "#73c936", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentWaiting", { fg = "#d19a66", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentIdle", { fg = "#6b7380", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentDone", { fg = "#518c26", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentError", { link = "DiagnosticError", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentUnknown", { link = "Comment", default = true })
   local special = vim.api.nvim_get_hl(0, { name = "Special", link = false })
   local current_item = { bold = true, default = true }
   if special.fg then current_item.fg = special.fg end
@@ -758,9 +832,13 @@ local function define_highlights()
 end
 
 function M.setup(opts)
+  agents.stop()
   config = vim.tbl_deep_extend("force", config, opts or {})
   window.open_files_do_not_replace_types = config.open_files_do_not_replace_types
   window.sidebar_width = config.width
+  agents.configure(config.agents, function()
+    if window.is_open() then refresh_agents() end
+  end)
 
   define_highlights()
 
@@ -821,10 +899,16 @@ function M.setup(opts)
     callback = function(args)
       local win = tonumber(args.match)
       if win and win == window.sidebar_win then
+        agents.stop()
         window.sidebar_win = nil
+        window.close_agents_window()
         window.close_projects_window()
         window.close_buffers_window()
         git.reset()
+        return
+      elseif win and win == window.agents_win then
+        window.agents_win = nil
+        window.layout_floating_panes()
         return
       elseif win and win == window.buffers_win then
         window.buffers_win = nil
@@ -875,7 +959,8 @@ function M.setup(opts)
     callback = function(args)
       if config.mode == "floating" then return end
       if not window.is_open() then return end
-      if args.buf ~= window.sidebar_buf and args.buf ~= window.buffers_buf
+      if args.buf ~= window.sidebar_buf and args.buf ~= window.agents_buf
+          and args.buf ~= window.buffers_buf
           and args.buf ~= window.projects_buf then
         return
       end

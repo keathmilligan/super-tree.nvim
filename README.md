@@ -14,6 +14,7 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 - Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, ahead/behind, stash, lines added/removed)
 - Buffers pane above the tree (independently scrollable and resizable; `B` to toggle)
 - Projects pane above Buffers when [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) or [neovim-project](https://github.com/coffebar/neovim-project) has projects available; select a project to switch workspaces
+- Agents pane above Projects for running and idle OpenCode V2 TUI instances, with colored status, project, description, agent/model details, and Super Project activation
 - LSP diagnostic icons on files and directories (bubbled to parents)
 - Background git refresh via filesystem watchers
 
@@ -22,6 +23,8 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 - Neovim 0.8+
 - Nerd Font
 - `git` in `$PATH` (for git status)
+- `opencode2` in `$PATH` (optional; for the Agents pane)
+- [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) (optional; required to activate an agent's project)
 
 ## Installation
 
@@ -82,7 +85,7 @@ Neo-tree filesystem defaults where practical. Editing keys are disabled.
 | Key | Action |
 |-----|--------|
 | `j` / `k` / arrows | Move |
-| `<Enter>` / double-click | Toggle directory / open file / switch project (Projects pane) |
+| `<Enter>` / double-click | Toggle directory / open file / switch project / activate an agent's project |
 | `l` / `<Right>` | Expand / open |
 | `h` / `<Left>` | Collapse / jump to parent |
 | `S` / `s` / `t` | Open in split / vsplit / tab |
@@ -94,7 +97,7 @@ Neo-tree filesystem defaults where practical. Editing keys are disabled.
 | `d` / `r` / `m` / `c` | Delete / rename / move / copy |
 | `y` / `x` / `p` | Clipboard copy / cut / paste |
 | `H` | Toggle hidden |
-| `/` | Live filter (tree, buffers, or projects pane; Enter opens, Esc clears) |
+| `/` | Live filter (tree, agents, buffers, or projects pane; Enter opens, Esc clears) |
 | `D` | Filter directories |
 | `#` | Fuzzy sorter |
 | `f` | Filter on submit |
@@ -129,6 +132,17 @@ require("super-tree").setup({
     enable = true,
     height = 8,
   },
+  agents = {
+    enable = true, -- automatically shown while OpenCode V2 has active sessions
+    height = 10,
+    refresh_interval = 2000, -- milliseconds
+    command = "opencode2",
+    symbols = {
+      running = "●",
+      idle = "○",
+      unknown = "?",
+    },
+  },
   projects = {
     enable = true, -- automatically shown when neovim-project has projects
     height = 20,
@@ -160,6 +174,22 @@ require("super-tree").setup({
 })
 ```
 
+### Agents
+
+Automatically appears above Projects while at least one full OpenCode V2 TUI process or unmatched active session exists. SuperTree asynchronously detects current-user `opencode2` TUI processes, excluding the background service and non-TUI commands, and reconciles them with `GET /api/session/active`. A TUI with an active agent shows the API status (`running` in the current V2 contract); a TUI with no active agent remains listed as `idle`. Active sessions without a matching TUI also remain visible. Historical sessions without a live TUI are not shown.
+
+Discovery polls every two seconds by default and hides the pane only when a successful snapshot contains neither a TUI nor an active session. `R` refreshes immediately. Linux uses `/proc` for each TUI's working directory; systems without `/proc` fall back to `lsof` when available.
+
+Each agent is a three-row entry:
+
+1. colored status icon and text, then project name;
+2. session description/title; and
+3. agent name plus model provider, model, and variant.
+
+`j` / `k` and the arrows move by agent rather than by display row. `<Enter>`, double-click, `l`, or `<Right>` on any of the three rows activates the workspace through super-project.nvim. If the OpenCode location is nested, SuperTree selects the longest registered project root containing it. Without Super Project, the pane remains usable but activation reports an error without changing the current workspace. `/` filters across status, project, description, agent, model, and path.
+
+Set `agents.enable = false` to disable the provider, `agents.height` to change its initial height, `agents.refresh_interval` to change polling frequency, or `agents.command` to use an explicit OpenCode V2 executable path. Status symbols are configurable under `agents.symbols`; unknown future status values remain visible with neutral styling.
+
 ### Projects
 
 Automatically appears above Buffers (or above the tree when Buffers is hidden) when a supported project provider discovers projects. [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) registers its native provider automatically; neovim-project remains the fallback. Projects are sorted by last use with the current project first. Missing directories are omitted; `R` refreshes the list.
@@ -181,7 +211,7 @@ require("super-tree").register_project_provider("my-projects", {
 })
 ```
 
-`capture_state()` returns serializable UI state and `restore_state(state)` reapplies it through SuperTree's own window APIs. super-project.nvim uses these hooks automatically; consumers should not access `super-tree.tree` or `super-tree.window` state directly.
+`capture_state()` returns serializable UI state and `restore_state(state)` reapplies it through SuperTree's own window APIs, including Agents selection/focus/height when the agent is still active. super-project.nvim uses these hooks automatically; consumers should not access `super-tree.tree` or `super-tree.window` state directly.
 
 ### Buffers
 
@@ -197,7 +227,7 @@ Right-aligned signs on files with LSP diagnostics (same text as the gutter: `vim
 
 ### Filter
 
-`/` live-filters the focused pane. In the tree, that is a substring match on names (50 hits); / move while typing; Enter opens the focused node and clears; Esc clears. In Projects or Buffers, `/` filters that list by name or path with the same keys (`#` fuzzy-ranks, `f` waits for Enter, `<C-x>` clears). `D` is tree directories only. `find_by_full_path_words` matches tree hits against the relative path instead of the filename.
+`/` live-filters the focused pane. In the tree, that is a substring match on names (50 hits); / move while typing; Enter opens the focused node and clears; Esc clears. In Agents, Projects, or Buffers, `/` filters that list by its displayed metadata or path with the same keys (`#` fuzzy-ranks, `f` waits for Enter, `<C-x>` clears). `D` is tree directories only. `find_by_full_path_words` matches tree hits against the relative path instead of the filename.
 
 ### Modes
 
@@ -219,7 +249,7 @@ Refreshed in the background from directory watchers, git-dir watchers, and `BufW
 
 Sidebar background is darkened from `Normal` and re-derived on `:colorscheme`. Override `SuperTreeNormal` (also `SuperTreeNormalNC`, `SuperTreeEndOfBuffer`, `SuperTreeCursorLine`, `SuperTreeWinSeparator`).
 
-Git highlight groups: `SuperTreeGitAdded`, `SuperTreeGitDeleted`, `SuperTreeGitModified`, `SuperTreeGitRenamed`, `SuperTreeGitStaged`, `SuperTreeGitUnstaged`, `SuperTreeGitUntracked`, `SuperTreeGitIgnored`, `SuperTreeGitConflict`, `SuperTreeGitBranch`, `SuperTreeGitAheadBehind`, `SuperTreeGitClean`. Active project and buffer names use `SuperTreeProjectsCurrent` and `SuperTreeBuffersCurrent` (Special, bold).
+Git highlight groups: `SuperTreeGitAdded`, `SuperTreeGitDeleted`, `SuperTreeGitModified`, `SuperTreeGitRenamed`, `SuperTreeGitStaged`, `SuperTreeGitUnstaged`, `SuperTreeGitUntracked`, `SuperTreeGitIgnored`, `SuperTreeGitConflict`, `SuperTreeGitBranch`, `SuperTreeGitAheadBehind`, `SuperTreeGitClean`. Agent statuses use `SuperTreeAgentRunning`, `SuperTreeAgentWaiting`, `SuperTreeAgentIdle`, `SuperTreeAgentDone`, `SuperTreeAgentError`, and `SuperTreeAgentUnknown`. Active project and buffer names use `SuperTreeProjectsCurrent` and `SuperTreeBuffersCurrent` (Special, bold).
 
 ### Icons
 

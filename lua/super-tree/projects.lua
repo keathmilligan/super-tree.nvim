@@ -153,6 +153,42 @@ function M.open(entry)
   return switched, err
 end
 
+-- Open the Super Project workspace containing `path`. Agent locations may be
+-- nested below a registered root, so prefer the longest containing project.
+-- This intentionally does not fall back to neovim-project: workspace capture
+-- and restoration must remain owned by super-project.nvim.
+function M.open_path(path)
+  if provider_name ~= "super-project" or not provider then
+    return false, "super-project.nvim is not available"
+  end
+  if type(path) ~= "string" or path == "" or vim.fn.isdirectory(path) ~= 1 then
+    return false, "agent project directory no longer exists: " .. tostring(path)
+  end
+
+  local resolved = vim.fn.resolve(normalize(path))
+  local target
+  local ok, values = pcall(provider.projects, { order = "recent" })
+  if ok and type(values) == "table" then
+    for _, value in ipairs(values) do
+      local root = type(value) == "table" and (value.root or value.path or value.dir) or value
+      if type(root) == "string" and root ~= "" then
+        local candidate = vim.fn.resolve(normalize(root))
+        local prefix = candidate == "/" and "/" or candidate .. "/"
+        if (resolved == candidate or resolved:sub(1, #prefix) == prefix)
+            and (not target or #candidate > #target) then
+          target = candidate
+        end
+      end
+    end
+  end
+  target = target or resolved
+
+  local switched, result, err = pcall(provider.open, target)
+  if not switched then return false, result end
+  if result == false then return false, err end
+  return true
+end
+
 function M.entry_at_cursor()
   if not window.projects_win or not vim.api.nvim_win_is_valid(window.projects_win) then return nil end
   return M.entries[vim.api.nvim_win_get_cursor(window.projects_win)[1]]

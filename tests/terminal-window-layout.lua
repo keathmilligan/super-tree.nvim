@@ -12,6 +12,7 @@ local super_tree = require("super-tree")
 vim.api.nvim_set_current_dir(root)
 super_tree.setup({
   mode = "sidebar",
+  agents = { enable = false },
   buffers = { enable = false },
   projects = { enable = false },
   git = { enable = false },

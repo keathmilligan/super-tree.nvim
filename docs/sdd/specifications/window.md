@@ -1,20 +1,34 @@
 ---
 feature: window
 created: 2026-09-12
-updated: 2026-09-12
+updated: 2026-09-18
 ---
 
 # Window
 
 | Created | Updated |
 | --- | --- |
-| 2026-09-12 | 2026-09-12 |
+| 2026-09-12 | 2026-09-18 |
 
 ## Purpose
 
 SuperTree window layout: how the tree sits beside editor windows, and what happens when buffers or windows close.
 
 ## Requirements
+
+### Stacked auxiliary panes
+
+When present, the sidebar column SHALL order windows from top to bottom as
+Agents, Projects, Buffers, and the file tree. Optional panes SHALL be real,
+independently scrollable and resizable windows.
+
+Opening or closing an optional pane SHALL preserve the measured heights of the
+other optional panes where the available screen permits. The file tree SHALL
+absorb the flexible remainder.
+
+Floating mode SHALL use the same order and SHALL keep every pane within the
+available editor height without overlap. Dynamically opening or closing a pane
+SHALL preserve focus when the previously focused window remains valid.
 
 ### Editor beside the tree
 
@@ -50,3 +64,4 @@ Quitting the last editor window with `:q` / `:quit` SHALL still close SuperTree 
 | Date | Change |
 | --- | --- |
 | 2026-09-12 | Initial spec from preserve-editor-on-buffer-close |
+| 2026-09-18 | Added ordered dynamic Agents/Projects/Buffers pane layout |

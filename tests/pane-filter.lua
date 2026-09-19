@@ -43,6 +43,7 @@ local function run()
   vim.cmd("edit " .. vim.fn.fnameescape(beta .. "/file.txt"))
 
   supertree.setup({
+    agents = { enable = false },
     git = { enable = false },
     diagnostics = { enable = false },
     projects = { enable = true },

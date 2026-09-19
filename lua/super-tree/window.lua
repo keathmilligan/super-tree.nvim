@@ -12,7 +12,22 @@ M.buffers_win = nil
 M.buffers_visible = false
 M.projects_buf = nil
 M.projects_win = nil
-local pane_heights = { buffers = 10, projects = 10 }
+M.agents_buf = nil
+M.agents_win = nil
+local pane_order = { "agents", "projects", "buffers" }
+local pane_heights = { agents = 10, projects = 10, buffers = 10 }
+
+local function valid_pane_win(pane)
+  local win = M[pane .. "_win"]
+  return win and vim.api.nvim_win_is_valid(win) and win or nil
+end
+
+local function any_pane_open()
+  for _, pane in ipairs(pane_order) do
+    if valid_pane_win(pane) then return true end
+  end
+  return false
+end
 
 -- ---------------------------------------------------------------------------
 -- Helpers
@@ -201,18 +216,15 @@ local function create_pane_buffer(pane)
   return M[key]
 end
 
--- All floating panes share one column, in Projects / Buffers / Tree order.
+-- All floating panes share one column, in Agents / Projects / Buffers / Tree order.
 -- Recompute together so toggling either pane cannot overlap the other.
 function M.layout_floating_panes()
   if not M.is_open() then return end
   local cfg = vim.api.nvim_win_get_config(M.sidebar_win)
   if cfg.relative == "" then return end
   local panes = {}
-  for _, pane in ipairs({ "projects", "buffers" }) do
-    local win = M[pane .. "_win"]
-    if win and vim.api.nvim_win_is_valid(win) then
-      panes[#panes + 1] = pane
-    end
+  for _, pane in ipairs(pane_order) do
+    if valid_pane_win(pane) then panes[#panes + 1] = pane end
   end
   local row = get_tabline_height()
   local total = math.max(#panes + 1, vim.o.lines - vim.o.cmdheight - row - 1)
@@ -237,6 +249,19 @@ function M.layout_floating_panes()
 end
 
 -- Panes are real, independently scrollable/resizable windows in split modes.
+local function lower_pane_anchor(pane)
+  local found = false
+  for _, candidate in ipairs(pane_order) do
+    if found then
+      local win = valid_pane_win(candidate)
+      if win then return win end
+    elseif candidate == pane then
+      found = true
+    end
+  end
+  return M.sidebar_win
+end
+
 local function open_pane(pane, height, title)
   if not M.is_open() then return nil end
   local key = pane .. "_win"
@@ -262,28 +287,31 @@ local function open_pane(pane, height, title)
     M.layout_floating_panes()
   else
     local current = vim.api.nvim_get_current_win()
-    local sibling = pane == "projects" and M.buffers_win or M.projects_win
-    local sibling_height = sibling and vim.api.nvim_win_is_valid(sibling)
-        and vim.api.nvim_win_get_height(sibling) or nil
-    local anchor = pane == "projects" and M.buffers_win or M.sidebar_win
-    if not anchor or not vim.api.nvim_win_is_valid(anchor) then anchor = M.sidebar_win end
+    local sibling_heights = {}
+    for _, candidate in ipairs(pane_order) do
+      local sibling = valid_pane_win(candidate)
+      if sibling then sibling_heights[sibling] = vim.api.nvim_win_get_height(sibling) end
+    end
+    local anchor = lower_pane_anchor(pane)
     vim.api.nvim_set_current_win(anchor)
     vim.cmd("aboveleft split")
     M[key] = vim.api.nvim_get_current_win()
     vim.api.nvim_win_set_buf(M[key], buf)
-    vim.api.nvim_win_set_height(M[key], height)
     -- Keep stacked panes at their height when other windows split or close
     -- ('equalalways'). The tree stays flexible and absorbs leftover space.
     -- winfixheight does not block <C-w>+/- or mouse resize.
     apply_win_opts(M[key], { statusline = " " .. title, winfixwidth = true, winfixheight = true })
     vim.wo[M.sidebar_win].winfixheight = false
-    if sibling_height then
-      -- :split can equalize the whole column. Keep the existing pane's
-      -- user-adjusted height, taking the new pane's space from the tree.
-      vim.wo[sibling].winfixheight = true
-      vim.api.nvim_win_set_height(sibling, sibling_height)
+    pcall(vim.api.nvim_win_set_height, M[key], height)
+    -- :split can equalize the whole column. Keep every existing pane's
+    -- user-adjusted height, taking the new pane's space from the tree.
+    for sibling, sibling_height in pairs(sibling_heights) do
+      if vim.api.nvim_win_is_valid(sibling) then
+        vim.wo[sibling].winfixheight = true
+        pcall(vim.api.nvim_win_set_height, sibling, sibling_height)
+      end
     end
-    vim.api.nvim_set_current_win(current)
+    if vim.api.nvim_win_is_valid(current) then vim.api.nvim_set_current_win(current) end
   end
 
   M.guard_window(M[key], buf)
@@ -292,21 +320,35 @@ end
 
 local function close_pane(pane)
   local key = pane .. "_win"
-  local sibling = pane == "projects" and M.buffers_win or M.projects_win
-  local sibling_valid = sibling and vim.api.nvim_win_is_valid(sibling)
-  local fixed = sibling_valid and vim.wo[sibling].winfixheight
-  if sibling_valid then vim.wo[sibling].winfixheight = true end
+  local fixed = {}
+  for _, candidate in ipairs(pane_order) do
+    if candidate ~= pane then
+      local sibling = valid_pane_win(candidate)
+      if sibling then
+        fixed[sibling] = vim.wo[sibling].winfixheight
+        vim.wo[sibling].winfixheight = true
+      end
+    end
+  end
   if M[key] and vim.api.nvim_win_is_valid(M[key]) then
     pcall(vim.api.nvim_win_close, M[key], true)
   end
-  if sibling_valid and vim.api.nvim_win_is_valid(sibling) then
-    vim.wo[sibling].winfixheight = fixed
+  for sibling, was_fixed in pairs(fixed) do
+    if vim.api.nvim_win_is_valid(sibling) then vim.wo[sibling].winfixheight = was_fixed end
   end
   M[key] = nil
   M.layout_floating_panes()
   if M.is_open() then
-    vim.wo[M.sidebar_win].winfixheight = not (M.buffers_win or M.projects_win)
+    vim.wo[M.sidebar_win].winfixheight = not any_pane_open()
   end
+end
+
+function M.open_agents_window(height)
+  return open_pane("agents", height, "Agents")
+end
+
+function M.close_agents_window()
+  close_pane("agents")
 end
 
 function M.open_buffers_window(height)
@@ -330,18 +372,16 @@ end
 
 function M.get_pane_heights()
   local result = vim.deepcopy(pane_heights)
-  if M.buffers_win and vim.api.nvim_win_is_valid(M.buffers_win) then
-    result.buffers = vim.api.nvim_win_get_height(M.buffers_win)
-  end
-  if M.projects_win and vim.api.nvim_win_is_valid(M.projects_win) then
-    result.projects = vim.api.nvim_win_get_height(M.projects_win)
+  for _, pane in ipairs(pane_order) do
+    local win = valid_pane_win(pane)
+    if win then result[pane] = vim.api.nvim_win_get_height(win) end
   end
   return result
 end
 
 function M.set_pane_heights(heights)
   if type(heights) ~= "table" then return end
-  for _, pane in ipairs({ "buffers", "projects" }) do
+  for _, pane in ipairs(pane_order) do
     local height = tonumber(heights[pane])
     if height and height > 0 then
       pane_heights[pane] = math.max(1, math.floor(height))
@@ -356,7 +396,12 @@ function M.set_pane_heights(heights)
 end
 
 function M.is_plugin_win(win)
-  return win ~= nil and (win == M.sidebar_win or win == M.buffers_win or win == M.projects_win)
+  if win == nil then return false end
+  if win == M.sidebar_win then return true end
+  for _, pane in ipairs(pane_order) do
+    if win == M[pane .. "_win"] then return true end
+  end
+  return false
 end
 
 function M.create_pinned_window(buf, width)
@@ -651,6 +696,7 @@ function M.is_open()
 end
 
 function M.close_window()
+  M.close_agents_window()
   M.close_projects_window()
   M.close_buffers_window()
   if not (M.sidebar_win and vim.api.nvim_win_is_valid(M.sidebar_win)) then
@@ -665,6 +711,37 @@ function M.close_window()
   end
   pcall(vim.api.nvim_win_close, M.sidebar_win, true)
   M.sidebar_win = nil
+end
+
+function M.setup_agents_keymaps(buf, actions, keymap_opts)
+  keymap_opts = keymap_opts or {}
+  local opts = { buffer = buf, nowait = true, silent = true }
+  disable_pane_splits(buf, opts)
+  local map = {
+    ["j"]             = actions.agent_down,
+    ["<Down>"]        = actions.agent_down,
+    ["k"]             = actions.agent_up,
+    ["<Up>"]          = actions.agent_up,
+    ["<CR>"]          = actions.activate_agent,
+    ["<2-LeftMouse>"] = actions.activate_agent,
+    ["l"]             = actions.activate_agent,
+    ["<Right>"]       = actions.activate_agent,
+    ["h"]             = actions.buffers_collapse,
+    ["<Left>"]        = actions.buffers_collapse,
+    ["<Tab>"]         = actions.focus_editor,
+    ["B"]             = actions.toggle_buffers,
+    ["R"]             = actions.refresh,
+    ["?"]             = actions.help,
+    ["/"]             = actions.fuzzy_finder,
+    ["#"]             = actions.fuzzy_sorter,
+    ["f"]             = actions.filter_on_submit,
+    ["<C-x>"]         = actions.clear_filter,
+    ["q"]             = actions.close,
+    ["<Esc>"]         = (keymap_opts.esc_closes ~= false) and actions.close or nil,
+  }
+  for key, fn in pairs(map) do
+    if fn then vim.keymap.set("n", key, fn, opts) end
+  end
 end
 
 function M.setup_projects_keymaps(buf, actions, keymap_opts)

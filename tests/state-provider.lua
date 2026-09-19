@@ -15,6 +15,7 @@ local opened
 local super_tree = require("super-tree")
 super_tree.setup({
   mode = "sidebar",
+  agents = { enable = false },
   buffers = { enable = true },
   projects = { enable = true, height = 5 },
   git = { enable = false },

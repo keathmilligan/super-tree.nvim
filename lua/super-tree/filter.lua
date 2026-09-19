@@ -66,7 +66,7 @@ local function glob_match(term, name, rel, full_path_words)
   return name:lower():find(term:lower(), 1, true) ~= nil
 end
 
--- Substring or fuzzy match against a list row (buffers / projects).
+-- Substring or fuzzy match against a list entry (agents / buffers / projects).
 function M.matches(term, name, path, use_fzy)
   if not term or term == "" then return true, 0 end
   name = name or ""
@@ -105,6 +105,9 @@ function M.filter_entries(entries, term, use_fzy)
 end
 
 local function pane_win(target)
+  if target == "agents" and window.agents_win and vim.api.nvim_win_is_valid(window.agents_win) then
+    return window.agents_win
+  end
   if target == "projects" and window.projects_win and vim.api.nvim_win_is_valid(window.projects_win) then
     return window.projects_win
   end
@@ -116,12 +119,14 @@ end
 
 local function detect_target()
   local win = vim.api.nvim_get_current_win()
+  if win == window.agents_win then return "agents" end
   if win == window.projects_win then return "projects" end
   if win == window.buffers_win then return "buffers" end
   return "tree"
 end
 
 local function pane_module(target)
+  if target == "agents" then return require("super-tree.agents") end
   if target == "projects" then return require("super-tree.projects") end
   if target == "buffers" then return require("super-tree.buffers") end
   return nil
@@ -141,7 +146,9 @@ local function clear_pane(target)
   if not mod then return end
   mod.search_pattern = nil
   mod.use_fzy = false
-  if target == "projects" then
+  if target == "agents" then
+    if callbacks.render_agents then callbacks.render_agents() end
+  elseif target == "projects" then
     if callbacks.render_projects then callbacks.render_projects() end
   elseif callbacks.render_buffers then
     callbacks.render_buffers()
@@ -152,10 +159,12 @@ local function apply_pane_search(target, term, opts)
   local mod = pane_module(target)
   if not mod then return end
   local selected = mod.entry_at_cursor()
-  local id_key = target == "projects" and "path" or "bufnr"
+  local id_key = target == "agents" and "id" or (target == "projects" and "path" or "bufnr")
   mod.search_pattern = (term and term ~= "") and term or nil
   mod.use_fzy = opts.use_fzy == true
-  if target == "projects" then
+  if target == "agents" then
+    if callbacks.render_agents then callbacks.render_agents() end
+  elseif target == "projects" then
     if callbacks.render_projects then callbacks.render_projects() end
   elseif callbacks.render_buffers then
     callbacks.render_buffers()
@@ -164,10 +173,14 @@ local function apply_pane_search(target, term, opts)
   if not win or not vim.api.nvim_win_is_valid(win) then return end
   local row = 1
   if selected then
-    for i, entry in ipairs(mod.entries) do
-      if entry[id_key] == selected[id_key] then
-        row = i
-        break
+    if target == "agents" and mod.row_for_id then
+      row = mod.row_for_id(selected.id) or 1
+    else
+      for i, entry in ipairs(mod.entries) do
+        if entry[id_key] == selected[id_key] then
+          row = i
+          break
+        end
       end
     end
   end
@@ -267,7 +280,7 @@ end
 local function apply_search(term)
   local opts = current_opts or {}
   local target = opts.target or "tree"
-  if target == "buffers" or target == "projects" then
+  if target == "agents" or target == "buffers" or target == "projects" then
     apply_pane_search(target, term, opts)
     return
   end
@@ -329,11 +342,15 @@ function M.clear(target)
   restore_expanded()
   local buffers = require("super-tree.buffers")
   local projects = require("super-tree.projects")
+  local agents = require("super-tree.agents")
+  agents.search_pattern = nil
+  agents.use_fzy = false
   buffers.search_pattern = nil
   buffers.use_fzy = false
   projects.search_pattern = nil
   projects.use_fzy = false
   if callbacks.rebuild then callbacks.rebuild() end
+  if callbacks.render_agents then callbacks.render_agents() end
   if callbacks.render_projects then callbacks.render_projects() end
 end
 
@@ -348,7 +365,7 @@ function M.is_active()
 end
 
 -- Apply `term` immediately (used by the input popup and by tests).
--- `target` is "tree", "buffers", or "projects" (default: current / tree).
+-- `target` is "tree", "agents", "buffers", or "projects" (default: current / tree).
 function M.apply_term(term, target)
   if target then
     current_opts = vim.tbl_extend("force", current_opts or {}, { target = target, live = true })
@@ -371,6 +388,10 @@ local function stop_timer()
 end
 
 local function prefix_for(opts)
+  if opts.target == "agents" then
+    if not opts.live then return "Search Agents: " end
+    return "Filter Agents: "
+  end
   if opts.target == "projects" then
     if not opts.live then return "Search Projects: " end
     return "Filter Projects: "
@@ -535,8 +556,14 @@ function M.start(opts)
   if current_opts.fuzzy_finder then
     local function pane_move(delta)
       return function()
-        local win = pane_win(current_opts and current_opts.target)
+        local target = current_opts and current_opts.target
+        local win = pane_win(target)
         if not win or not vim.api.nvim_win_is_valid(win) then return end
+        if target == "agents" then
+          local agents = pane_module("agents")
+          if agents and agents.move then agents.move(delta) end
+          return
+        end
         local row = vim.api.nvim_win_get_cursor(win)[1]
         local last = vim.api.nvim_buf_line_count(vim.api.nvim_win_get_buf(win))
         row = math.max(1, math.min(last, row + delta))

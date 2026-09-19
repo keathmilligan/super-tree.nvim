@@ -299,8 +299,8 @@ end
 
 local HELP_ENTRIES = {
   { "j / k / arrows", "move up / down" },
-  { "<CR>",           "toggle directory / open file / switch project" },
-  { "<2-LeftMouse>",  "toggle directory / open file / switch project" },
+  { "<CR>",           "open file / project / agent's project" },
+  { "<2-LeftMouse>",  "open file / project / agent's project" },
   { "l / <Right>",    "expand directory / open file" },
   { "h / <Left>",     "collapse directory / go to parent" },
   { "S",              "open in horizontal split" },
@@ -321,13 +321,13 @@ local HELP_ENTRIES = {
   { "x",              "cut node to clipboard" },
   { "p",              "paste clipboard node here" },
   { "H",              "toggle hidden (dotfiles, gitignored)" },
-  { "/",              "live filter (tree / buffers / projects)" },
+  { "/",              "live filter (tree / agents / buffers / projects)" },
   { "D",              "filter directories" },
   { "#",              "fuzzy sorter" },
   { "f",              "filter on submit" },
   { "<C-x>",          "clear filter" },
   { "B",              "toggle buffers pane" },
-  { "R",              "refresh projects, tree and git status" },
+  { "R",              "refresh agents, projects, tree and git status" },
   { "?",              "this help" },
   { "q / <Esc>",      "close (<Esc> not in sidebar mode)" },
 }

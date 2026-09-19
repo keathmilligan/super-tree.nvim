@@ -21,7 +21,11 @@ local function run()
   local projects = require("super-tree.projects")
   local filter = require("super-tree.filter")
 
-  supertree.setup({ git = { enable = false }, diagnostics = { enable = false } })
+  supertree.setup({
+    agents = { enable = false },
+    git = { enable = false },
+    diagnostics = { enable = false },
+  })
   supertree.open()
   check(not window.projects_win, "no provider should mean no Projects pane")
   supertree.close()
