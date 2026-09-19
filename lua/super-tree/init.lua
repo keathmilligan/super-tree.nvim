@@ -51,10 +51,11 @@ local config      = {
     refresh_interval = 2000,
     command = "opencode2",
     symbols = {
-      running = "●",
+      working = "●",
       blocked = "◉",
       question = "?",
       idle = "○",
+      done = "✓",
       unknown = "?",
     },
   },
@@ -816,10 +817,13 @@ local function define_highlights()
   vim.api.nvim_set_hl(0, "SuperTreeDiagnosticWarn", { link = "DiagnosticWarn", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeDiagnosticInfo", { link = "DiagnosticInfo", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeDiagnosticHint", { link = "DiagnosticHint", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeAgentRunning", { fg = "#73c936", bold = true, default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeAgentWaiting", { fg = "#d19a66", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentWorking", { fg = "#e5c07b", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentRunning", { link = "SuperTreeAgentWorking", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentWaiting", { fg = "#e5c07b", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentBlocked", { fg = "#e06c75", bold = true, default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentQuestion", { fg = "#61afef", bold = true, default = true })
   vim.api.nvim_set_hl(0, "SuperTreeAgentIdle", { fg = "#6b7380", default = true })
-  vim.api.nvim_set_hl(0, "SuperTreeAgentDone", { fg = "#518c26", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentDone", { fg = "#98c379", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeAgentError", { link = "DiagnosticError", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeAgentUnknown", { link = "Comment", default = true })
   local special = vim.api.nvim_get_hl(0, { name = "Special", link = false })

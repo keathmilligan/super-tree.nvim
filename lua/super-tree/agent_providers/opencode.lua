@@ -4,6 +4,7 @@
 local M = {}
 
 local detail_cache = {}
+local tui_history = {}
 local injected_runner
 local injected_cwd_resolver
 
@@ -278,7 +279,8 @@ end
 local function active_status(value)
   local status = type(value) == "table" and value.type or value
   if type(status) ~= "string" or status == "" then return "unknown" end
-  return status:lower()
+  status = status:lower()
+  return status == "running" and "working" or status
 end
 
 local function has_pending(response)
@@ -367,6 +369,18 @@ local function idle_entry(tui, status)
   })
 end
 
+local function done_entry(tui, previous)
+  local entry = vim.deepcopy(previous)
+  entry.id = "opencode-tui:" .. tostring(tui.pid)
+  entry.instance = "tui"
+  entry.pid = tui.pid
+  entry.status = "done"
+  entry.tui_directory = tui.directory
+  entry.directory = entry.directory or tui.directory
+  entry.project = project_name(tui.directory)
+  return update_searchable(entry)
+end
+
 local STATUS_PRIORITY = {
   blocked = 1,
   question = 1,
@@ -399,9 +413,11 @@ end
 local function reconcile(tuis, active_entries, active_known)
   local entries = {}
   local used = {}
+  local live_pids = {}
   table.sort(tuis, function(a, b) return a.pid < b.pid end)
 
   for _, tui in ipairs(tuis) do
+    live_pids[tui.pid] = true
     local best_index, best_score
     if active_known then
       for index, entry in ipairs(active_entries) do
@@ -423,10 +439,21 @@ local function reconcile(tuis, active_entries, active_known)
       entry.tui_directory = tui.directory
       entry.directory = entry.directory or tui.directory
       entry.project = project_name(tui.directory)
-      entries[#entries + 1] = update_searchable(entry)
+      entry = update_searchable(entry)
+      tui_history[tui.pid] = vim.deepcopy(entry)
+      entries[#entries + 1] = entry
     else
-      entries[#entries + 1] = idle_entry(tui, active_known and "idle" or "unknown")
+      local previous = tui_history[tui.pid]
+      if active_known and previous then
+        entries[#entries + 1] = done_entry(tui, previous)
+      else
+        entries[#entries + 1] = idle_entry(tui, active_known and "idle" or "unknown")
+      end
     end
+  end
+
+  for pid in pairs(tui_history) do
+    if not live_pids[pid] then tui_history[pid] = nil end
   end
 
   for index, entry in ipairs(active_entries) do
@@ -633,6 +660,7 @@ function M._reset()
   injected_runner = nil
   injected_cwd_resolver = nil
   detail_cache = {}
+  tui_history = {}
 end
 
 return M

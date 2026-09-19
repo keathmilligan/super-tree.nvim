@@ -247,7 +247,7 @@ local function run()
       height = 9,
       refresh_interval = 60000,
       command = "fixture",
-      symbols = { running = "R", unknown = "U" },
+      symbols = { working = "W", unknown = "U" },
     },
     projects = { enable = true, height = 7 },
     buffers = { enable = true, height = 6 },
@@ -283,6 +283,14 @@ local function run()
   check(#lines == 9, "three TUI instances render as nine content rows")
   check(lines[1]:find("◉ blocked", 1, true) and lines[1]:find("alpha", 1, true),
     "row one reflects a pending permission prompt")
+  local blocked_marks = vim.api.nvim_buf_get_extmarks(
+    window.agents_buf, -1, { 0, 0 }, { 0, -1 }, { details = true }
+  )
+  local blocked_hl
+  for _, mark in ipairs(blocked_marks) do
+    if mark[4].hl_group == "SuperTreeAgentBlocked" then blocked_hl = true end
+  end
+  check(blocked_hl, "blocked status uses its dedicated highlight")
   check(lines[2]:find("Implement alpha feature", 1, true), "row two shows description")
   check(lines[3]:find("build · opencode/gpt-5.6-sol · max", 1, true),
     "row three shows agent and model information")
@@ -292,9 +300,17 @@ local function run()
   )
   local question_hl
   for _, mark in ipairs(question_marks) do
-    if mark[4].hl_group == "SuperTreeAgentWaiting" then question_hl = true end
+    if mark[4].hl_group == "SuperTreeAgentQuestion" then question_hl = true end
   end
-  check(question_hl, "question status uses the waiting highlight")
+  check(question_hl, "question status uses its dedicated highlight")
+  check(vim.api.nvim_get_hl(0, { name = "SuperTreeAgentWorking", link = false }).fg == 0xe5c07b,
+    "working status is yellow")
+  check(vim.api.nvim_get_hl(0, { name = "SuperTreeAgentBlocked", link = false }).fg == 0xe06c75,
+    "blocked status is red")
+  check(vim.api.nvim_get_hl(0, { name = "SuperTreeAgentQuestion", link = false }).fg == 0x61afef,
+    "question status is blue")
+  check(vim.api.nvim_get_hl(0, { name = "SuperTreeAgentDone", link = false }).fg == 0x98c379,
+    "done status is green")
   check(lines[7]:find("○ idle", 1, true), "TUI without a running agent renders as idle")
   check(lines[8]:find("OpenCode TUI · PID 9003", 1, true), "idle TUI description identifies the instance")
   check(lines[9]:find("no active agent · model unavailable", 1, true),
@@ -383,7 +399,8 @@ local function run()
     supertree.close()
   end
 
-  -- Idle TUIs remain visible; only a snapshot with no TUI and no agent hides.
+  -- Completed TUIs become done while never-active TUIs remain idle. Only a
+  -- snapshot with no TUI and no agent hides.
   supertree.setup({ mode = "sidebar" })
   supertree.open()
   wait_for(function() return window.agents_win ~= nil end, "Agents reopens from cached snapshot")
@@ -393,12 +410,19 @@ local function run()
   agents.refresh(true, true)
   wait_for(function()
     if #agents.all ~= 3 then return false end
+    local counts = { done = 0, idle = 0 }
     for _, entry in ipairs(agents.all) do
-      if entry.status ~= "idle" then return false end
+      counts[entry.status] = (counts[entry.status] or 0) + 1
     end
-    return true
-  end, "TUIs without active sessions become idle")
-  check(window.agents_win ~= nil, "idle TUI instances keep Agents visible")
+    return counts.done == 2 and counts.idle == 1
+  end, "completed TUIs become done while an initially inactive TUI stays idle")
+  local completed
+  for _, entry in ipairs(agents.all) do
+    if entry.pid == 9001 then completed = entry end
+  end
+  check(completed and completed.title == "Implement alpha feature" and completed.agent == "build",
+    "done TUI retains its completed session metadata")
+  check(window.agents_win ~= nil, "done and idle TUI instances keep Agents visible")
 
   responses["/processes"] = ""
   agents.refresh(true, true)
@@ -416,9 +440,17 @@ local function run()
   responses["/api/session/active"] = encode({ data = { ses_alpha = { type = "running" } } })
   responses["/api/session/ses_alpha/permission"] = encode({ data = {} })
   agents.refresh(true, true)
-  wait_for(function() return #agents.all == 1 and agents.all[1].status == "running" end,
+  wait_for(function() return #agents.all == 1 and agents.all[1].status == "working" end,
     "idle TUI updates in place when its agent starts")
-  check(agents.all[1].id == "opencode-tui:9001", "TUI identity remains stable across idle/running")
+  check(agents.all[1].id == "opencode-tui:9001", "TUI identity remains stable across idle/working")
+  local working_marks = vim.api.nvim_buf_get_extmarks(
+    window.agents_buf, -1, { 0, 0 }, { 0, -1 }, { details = true }
+  )
+  local working_hl
+  for _, mark in ipairs(working_marks) do
+    if mark[4].hl_group == "SuperTreeAgentWorking" then working_hl = true end
+  end
+  check(working_hl, "working status uses its dedicated yellow highlight")
 
   -- Partial failure keeps the TUI visible with unknown status; total failure
   -- retains that last usable snapshot.

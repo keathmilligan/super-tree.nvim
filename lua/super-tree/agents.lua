@@ -41,11 +41,11 @@ local DEFAULT_SYMBOLS = {
 }
 
 local STATUS_HIGHLIGHTS = {
-  running = "SuperTreeAgentRunning",
-  working = "SuperTreeAgentRunning",
+  running = "SuperTreeAgentWorking",
+  working = "SuperTreeAgentWorking",
   waiting = "SuperTreeAgentWaiting",
-  blocked = "SuperTreeAgentWaiting",
-  question = "SuperTreeAgentWaiting",
+  blocked = "SuperTreeAgentBlocked",
+  question = "SuperTreeAgentQuestion",
   idle = "SuperTreeAgentIdle",
   done = "SuperTreeAgentDone",
   succeeded = "SuperTreeAgentDone",

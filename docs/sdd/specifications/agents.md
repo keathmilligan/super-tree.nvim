@@ -24,10 +24,13 @@ by the current user. Background services and non-TUI commands such as `api`,
 
 SuperTree SHALL reconcile TUI instances with active OpenCode V2 sessions:
 
-- A TUI matched to an active session SHALL show the session's reported status.
+- A TUI matched to a `running` active session SHALL show `working`.
 - A pending permission request SHALL override an active status with `blocked`.
 - A pending question or form SHALL override an active status with `question`.
-- A TUI without a matched active session SHALL remain visible as `idle`.
+- A newly detected TUI without a matched active session SHALL show `idle`.
+- When a previously active TUI no longer has an active session, it SHALL show
+  `done` and retain its last session metadata until new work starts or the TUI
+  exits.
 - An active session without a matched TUI SHALL remain visible.
 - A historical session without a live TUI and without active work SHALL NOT be
   shown.
@@ -68,6 +71,9 @@ Each agent entry SHALL occupy three rows:
 The status icon and status text SHALL both use the status color. Status SHALL
 also be expressed as text so color is not the sole indicator. An unknown status
 value SHALL remain visible with neutral styling and its original text.
+
+`working` SHALL use yellow, `blocked` SHALL use red, `question` SHALL use blue,
+and `done` SHALL use green.
 
 An idle TUI without agent metadata SHALL clearly state that no agent is active
 and that model information is unavailable.
@@ -135,3 +141,4 @@ Configuration SHALL support:
 | 2026-09-18 | Initial Agents specification from add-agents-panel |
 | 2026-09-18 | Clarified exact-directory Super Project fallback |
 | 2026-09-18 | Added blocked permission and question prompt statuses |
+| 2026-09-18 | Distinguished idle, working, and completed TUI states and colors |
