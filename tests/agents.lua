@@ -130,20 +130,41 @@ local function run()
     model = { providerID = "xai", id = "grok-4.6", variant = "high" },
     location = { directory = beta },
   } })
+  responses["/api/session/ses_alpha/permission"] = encode({ data = {
+    { id = "per_alpha", sessionID = "ses_alpha", action = "bash", resources = { "*" } },
+  } })
+  responses["/api/session/ses_alpha/question"] = encode({ data = {} })
+  responses["/api/session/ses_alpha/form"] = encode({ data = {
+    { id = "frm_alpha", sessionID = "ses_alpha", title = "Choose deployment", fields = {} },
+  } })
+  responses["/api/session/ses_beta/permission"] = encode({ data = {} })
+  responses["/api/session/ses_beta/question"] = encode({ data = {} })
+  responses["/api/session/ses_beta/form"] = encode({ data = {
+    { id = "frm_beta", sessionID = "ses_beta", title = "Choose review mode", fields = {} },
+  } })
 
   local parsed = collect({ force = true })
   check(parsed.ok and #parsed.value == 3, "provider returns matched active and idle TUI instances")
   local by_pid = {}
   for _, entry in ipairs(parsed.value) do by_pid[entry.pid] = entry end
-  check(by_pid[9001].session_id == "ses_alpha" and by_pid[9001].status == "running",
-    "provider matches a running session to its TUI")
+  check(by_pid[9001].session_id == "ses_alpha" and by_pid[9001].status == "blocked",
+    "pending permission overrides running status as blocked")
   check(by_pid[9001].model_provider == "opencode" and by_pid[9001].model_variant == "max",
     "provider retains model metadata")
-  check(by_pid[9002].status == "future-state", "unknown active status remains visible")
+  check(by_pid[9002].status == "question", "pending form overrides active status as question")
   check(by_pid[9003].status == "idle" and by_pid[9003].session_id == nil,
     "TUI without an active session remains visible as idle")
   check(by_pid[9010] == nil and by_pid[9011] == nil and by_pid[9012] == nil,
     "service and non-TUI commands are excluded")
+
+  responses["/api/session/ses_beta/form"] = encode({ data = {} })
+  local unprompted = collect({ force = true })
+  local unprompted_beta
+  for _, entry in ipairs(unprompted.value) do
+    if entry.session_id == "ses_beta" then unprompted_beta = entry end
+  end
+  check(unprompted_beta and unprompted_beta.status == "future-state",
+    "unknown active status remains visible without a pending prompt")
 
   responses["/processes"] = ""
   responses["/api/session/active"] = "not json"
@@ -203,6 +224,16 @@ local function run()
     model = { providerID = "xai", id = "grok-4.6", variant = "high" },
     location = { directory = beta },
   } })
+  responses["/api/session/ses_alpha/permission"] = encode({ data = {
+    { id = "per_alpha", sessionID = "ses_alpha", action = "bash", resources = { "*" } },
+  } })
+  responses["/api/session/ses_alpha/question"] = encode({ data = {} })
+  responses["/api/session/ses_alpha/form"] = encode({ data = {} })
+  responses["/api/session/ses_beta/permission"] = encode({ data = {} })
+  responses["/api/session/ses_beta/question"] = encode({ data = {
+    { id = "que_beta", sessionID = "ses_beta", questions = {} },
+  } })
+  responses["/api/session/ses_beta/form"] = encode({ data = {} })
 
   local agents = require("super-tree.agents")
   local window = require("super-tree.window")
@@ -250,24 +281,24 @@ local function run()
 
   local lines = vim.api.nvim_buf_get_lines(window.agents_buf, 0, -1, false)
   check(#lines == 9, "three TUI instances render as nine content rows")
-  check(lines[1]:find("R running", 1, true) and lines[1]:find("alpha", 1, true),
-    "row one shows configured icon, status, and project")
+  check(lines[1]:find("◉ blocked", 1, true) and lines[1]:find("alpha", 1, true),
+    "row one reflects a pending permission prompt")
   check(lines[2]:find("Implement alpha feature", 1, true), "row two shows description")
   check(lines[3]:find("build · opencode/gpt-5.6-sol · max", 1, true),
     "row three shows agent and model information")
-  check(lines[4]:find("○ idle", 1, true), "TUI without a running agent renders as idle")
-  check(lines[5]:find("OpenCode TUI · PID 9003", 1, true), "idle TUI description identifies the instance")
-  check(lines[6]:find("no active agent · model unavailable", 1, true),
-    "idle TUI explains missing agent and model metadata")
-  check(lines[7]:find("U future-state", 1, true), "unknown status uses configured neutral symbol")
-  local unknown_marks = vim.api.nvim_buf_get_extmarks(
-    window.agents_buf, -1, { 6, 0 }, { 6, -1 }, { details = true }
+  check(lines[4]:find("? question", 1, true), "question request is reflected in the status row")
+  local question_marks = vim.api.nvim_buf_get_extmarks(
+    window.agents_buf, -1, { 3, 0 }, { 3, -1 }, { details = true }
   )
-  local unknown_hl
-  for _, mark in ipairs(unknown_marks) do
-    if mark[4].hl_group == "SuperTreeAgentUnknown" then unknown_hl = true end
+  local question_hl
+  for _, mark in ipairs(question_marks) do
+    if mark[4].hl_group == "SuperTreeAgentWaiting" then question_hl = true end
   end
-  check(unknown_hl, "unknown status uses the neutral highlight")
+  check(question_hl, "question status uses the waiting highlight")
+  check(lines[7]:find("○ idle", 1, true), "TUI without a running agent renders as idle")
+  check(lines[8]:find("OpenCode TUI · PID 9003", 1, true), "idle TUI description identifies the instance")
+  check(lines[9]:find("no active agent · model unavailable", 1, true),
+    "idle TUI explains missing agent and model metadata")
 
   vim.api.nvim_win_set_cursor(window.agents_win, { 2, 0 })
   check(agents.entry_at_cursor().id == "opencode-tui:9001", "description row maps to its TUI")
@@ -281,10 +312,10 @@ local function run()
   key(window.agents_buf, "<CR>")
   check(opened == vim.fn.resolve(alpha), "Enter resolves a nested location to the closest project root")
   opened = nil
-  vim.api.nvim_win_set_cursor(window.agents_win, { 5, 0 })
+  vim.api.nvim_win_set_cursor(window.agents_win, { 8, 0 })
   key(window.agents_buf, "<CR>")
   check(opened == vim.fn.resolve(alpha), "idle TUI activation uses its process working directory")
-  vim.api.nvim_win_set_cursor(window.agents_win, { 9, 0 })
+  vim.api.nvim_win_set_cursor(window.agents_win, { 6, 0 })
   key(window.agents_buf, "<2-LeftMouse>")
   check(opened == vim.fn.resolve(beta), "double-click works from the model row")
 
@@ -319,7 +350,7 @@ local function run()
 
   -- State records a three-row selection, focus, and Agents height.
   vim.api.nvim_win_set_height(window.agents_win, 8)
-  vim.api.nvim_win_set_cursor(window.agents_win, { 9, 0 })
+  vim.api.nvim_win_set_cursor(window.agents_win, { 6, 0 })
   vim.api.nvim_set_current_win(window.agents_win)
   local state = supertree.capture_state()
   check(state.selected_agent == "opencode-tui:9002" and state.focused_pane == "agents",
@@ -383,6 +414,7 @@ local function run()
   check(vim.api.nvim_get_current_win() == editor, "idle TUI auto-show does not steal focus")
 
   responses["/api/session/active"] = encode({ data = { ses_alpha = { type = "running" } } })
+  responses["/api/session/ses_alpha/permission"] = encode({ data = {} })
   agents.refresh(true, true)
   wait_for(function() return #agents.all == 1 and agents.all[1].status == "running" end,
     "idle TUI updates in place when its agent starts")

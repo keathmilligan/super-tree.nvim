@@ -25,6 +25,8 @@ by the current user. Background services and non-TUI commands such as `api`,
 SuperTree SHALL reconcile TUI instances with active OpenCode V2 sessions:
 
 - A TUI matched to an active session SHALL show the session's reported status.
+- A pending permission request SHALL override an active status with `blocked`.
+- A pending question or form SHALL override an active status with `question`.
 - A TUI without a matched active session SHALL remain visible as `idle`.
 - An active session without a matched TUI SHALL remain visible.
 - A historical session without a live TUI and without active work SHALL NOT be
@@ -132,3 +134,4 @@ Configuration SHALL support:
 | --- | --- |
 | 2026-09-18 | Initial Agents specification from add-agents-panel |
 | 2026-09-18 | Clarified exact-directory Super Project fallback |
+| 2026-09-18 | Added blocked permission and question prompt statuses |

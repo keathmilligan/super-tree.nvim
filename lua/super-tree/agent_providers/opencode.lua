@@ -281,6 +281,17 @@ local function active_status(value)
   return status:lower()
 end
 
+local function has_pending(response)
+  if type(response) ~= "table" or type(response.data) ~= "table" then return false end
+  return next(response.data) ~= nil
+end
+
+local function prompted_status(base, pending)
+  if pending.permission then return "blocked" end
+  if pending.question or pending.form then return "question" end
+  return base
+end
+
 local function model_fields(info)
   local model = type(info) == "table" and info.model or nil
   if type(model) ~= "table" then
@@ -358,6 +369,7 @@ end
 
 local STATUS_PRIORITY = {
   blocked = 1,
+  question = 1,
   waiting = 1,
   running = 2,
   working = 2,
@@ -534,6 +546,7 @@ function M.collect(config, opts, callback)
 
       local now = vim.loop.hrtime() / 1000000
       local details = {}
+      local prompts = {}
       local pending = 0
       local completed = false
       local launching = true
@@ -544,7 +557,8 @@ function M.collect(config, opts, callback)
         local entries = {}
         for _, id in ipairs(ids) do
           local cached = details[id] or (detail_cache[id] and detail_cache[id].value)
-          entries[#entries + 1] = entry_for(id, active_status(active[id]), cached)
+          local status = prompted_status(active_status(active[id]), prompts[id] or {})
+          entries[#entries + 1] = entry_for(id, status, cached)
         end
         sort_entries(entries)
         sessions_done = true
@@ -554,6 +568,7 @@ function M.collect(config, opts, callback)
       end
 
       for _, id in ipairs(ids) do
+        prompts[id] = {}
         local cached = detail_cache[id]
         local fresh = cached and not opts.force and now - cached.fetched_at < refresh_age
         if fresh then
@@ -568,6 +583,22 @@ function M.collect(config, opts, callback)
             elseif cached then
               details[id] = cached.value
             end
+            pending = pending - 1
+            complete_if_ready()
+          end))
+        end
+
+        local prompt_paths = {
+          permission = "/api/session/" .. id .. "/permission",
+          question = "/api/session/" .. id .. "/question",
+          form = "/api/session/" .. id .. "/form",
+        }
+        for kind, path in pairs(prompt_paths) do
+          local prompt_kind = kind
+          pending = pending + 1
+          add_handle(run_json(command, path, timeout, function(prompt_ok, payload)
+            if cancelled then return end
+            if prompt_ok then prompts[id][prompt_kind] = has_pending(payload) end
             pending = pending - 1
             complete_if_ready()
           end))

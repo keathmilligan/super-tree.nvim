@@ -44,7 +44,7 @@ local config      = {
     enable = true,
     height = 10,
   },
-  -- Running coding agents above Projects. OpenCode V2 is the first provider.
+  -- Live coding-agent instances above Projects. OpenCode V2 is the first provider.
   agents                          = {
     enable = true,
     height = 10,
@@ -52,6 +52,8 @@ local config      = {
     command = "opencode2",
     symbols = {
       running = "●",
+      blocked = "◉",
+      question = "?",
       idle = "○",
       unknown = "?",
     },

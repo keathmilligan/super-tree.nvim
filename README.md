@@ -14,7 +14,7 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 - Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, ahead/behind, stash, lines added/removed)
 - Buffers pane above the tree (independently scrollable and resizable; `B` to toggle)
 - Projects pane above Buffers when [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) or [neovim-project](https://github.com/coffebar/neovim-project) has projects available; select a project to switch workspaces
-- Agents pane above Projects for running and idle OpenCode V2 TUI instances, with colored status, project, description, agent/model details, and Super Project activation
+- Agents pane above Projects for running, blocked, questioning, and idle OpenCode V2 TUI instances, with colored status, project, description, agent/model details, and Super Project activation
 - LSP diagnostic icons on files and directories (bubbled to parents)
 - Background git refresh via filesystem watchers
 
@@ -133,12 +133,14 @@ require("super-tree").setup({
     height = 8,
   },
   agents = {
-    enable = true, -- automatically shown while OpenCode V2 has active sessions
+    enable = true, -- automatically shown while OpenCode V2 has live TUIs or agents
     height = 10,
     refresh_interval = 2000, -- milliseconds
     command = "opencode2",
     symbols = {
       running = "●",
+      blocked = "◉",
+      question = "?",
       idle = "○",
       unknown = "?",
     },
@@ -176,7 +178,7 @@ require("super-tree").setup({
 
 ### Agents
 
-Automatically appears above Projects while at least one full OpenCode V2 TUI process or unmatched active session exists. SuperTree asynchronously detects current-user `opencode2` TUI processes, excluding the background service and non-TUI commands, and reconciles them with `GET /api/session/active`. A TUI with an active agent shows the API status (`running` in the current V2 contract); a TUI with no active agent remains listed as `idle`. Active sessions without a matching TUI also remain visible. Historical sessions without a live TUI are not shown.
+Automatically appears above Projects while at least one full OpenCode V2 TUI process or unmatched active session exists. SuperTree asynchronously detects current-user `opencode2` TUI processes, excluding the background service and non-TUI commands, and reconciles them with `GET /api/session/active`. Active sessions show `blocked` while awaiting permission, `question` while awaiting an interactive question/form response, and otherwise use the active API status (`running` in the current V2 contract). A TUI with no active agent remains listed as `idle`. Active sessions without a matching TUI also remain visible. Historical sessions without a live TUI are not shown.
 
 Discovery polls every two seconds by default and hides the pane only when a successful snapshot contains neither a TUI nor an active session. `R` refreshes immediately. Linux uses `/proc` for each TUI's working directory; systems without `/proc` fall back to `lsof` when available.
 
