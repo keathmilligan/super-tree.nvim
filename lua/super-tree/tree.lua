@@ -858,7 +858,12 @@ function M.render(sidebar_buf, config)
     end
 
     if entry.is_dir then
-      table.insert(dir_hl, { line = lnum, start = name_byte_start, end_ = name_byte_end })
+      if name_status_hl == "SuperTreeGitIgnored" then
+        -- Ignored directories are grayed out like ignored files.
+        table.insert(git_hl, { line = lnum, start = name_byte_start, end_ = name_byte_end, hl = name_status_hl })
+      else
+        table.insert(dir_hl, { line = lnum, start = name_byte_start, end_ = name_byte_end })
+      end
       if git_badge_hl and #git_badge > 0 then
         local badge_start = name_byte_start + #display_name
         table.insert(git_hl, { line = lnum, start = badge_start, end_ = badge_start + #git_badge, hl = git_badge_hl })
