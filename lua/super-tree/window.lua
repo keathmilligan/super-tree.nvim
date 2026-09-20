@@ -378,24 +378,31 @@ local function open_pane(pane, height)
   return buf
 end
 
-local function close_pane(pane)
-  local key = pane .. "_win"
+-- Closing a split with 'equalalways' can resize windows outside the sidebar.
+-- Protect every other split's height for the close, leaving only the tree
+-- flexible so it absorbs the space. Restore each window's original option,
+-- including when the close fails (for example, for the last window).
+local function close_without_resizing(win)
+  if not win or not vim.api.nvim_win_is_valid(win) then return end
   local fixed = {}
-  for _, candidate in ipairs(pane_order) do
-    if candidate ~= pane then
-      local sibling = valid_pane_win(candidate)
-      if sibling then
+  if vim.api.nvim_win_get_config(win).relative == "" then
+    for _, sibling in ipairs(vim.api.nvim_tabpage_list_wins(vim.api.nvim_win_get_tabpage(win))) do
+      if sibling ~= win and sibling ~= M.sidebar_win
+          and vim.api.nvim_win_get_config(sibling).relative == "" then
         fixed[sibling] = vim.wo[sibling].winfixheight
         vim.wo[sibling].winfixheight = true
       end
     end
   end
-  if M[key] and vim.api.nvim_win_is_valid(M[key]) then
-    pcall(vim.api.nvim_win_close, M[key], true)
-  end
+  pcall(vim.api.nvim_win_close, win, true)
   for sibling, was_fixed in pairs(fixed) do
     if vim.api.nvim_win_is_valid(sibling) then vim.wo[sibling].winfixheight = was_fixed end
   end
+end
+
+local function close_pane(pane)
+  local key = pane .. "_win"
+  close_without_resizing(M[key])
   M[key] = nil
   M.layout_floating_panes()
   if M.is_open() then
@@ -781,7 +788,7 @@ function M.close_window()
       reset_editor_win_opts(vim.api.nvim_get_current_win())
     end)
   end
-  pcall(vim.api.nvim_win_close, M.sidebar_win, true)
+  close_without_resizing(M.sidebar_win)
   M.sidebar_win = nil
 end
 
