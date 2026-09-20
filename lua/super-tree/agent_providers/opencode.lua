@@ -165,9 +165,19 @@ local TERMINATING_FLAGS = {
   ["-v"] = true,
 }
 
+-- `comm` reports the resolved binary name. The V2 release installs the real
+-- binary as `opencode` behind an `opencode2` wrapper script that execs it, so
+-- TUI processes surface under both names depending on the install layout.
+local TUI_EXECUTABLES = {
+  opencode = true,
+  ["opencode.exe"] = true,
+  opencode2 = true,
+  ["opencode2.exe"] = true,
+}
+
 local function is_full_tui(comm, args)
   local executable = type(comm) == "string" and comm:match("([^/]+)$") or ""
-  if executable ~= "opencode2" and executable ~= "opencode2.exe" then return false end
+  if not TUI_EXECUTABLES[executable] then return false end
   local rest = type(args) == "string" and args:match("^%s*%S+%s*(.*)$") or ""
   local tokens = {}
   for token in rest:gmatch("%S+") do

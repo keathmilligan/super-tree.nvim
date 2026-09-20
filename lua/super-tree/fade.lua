@@ -124,6 +124,16 @@ function M.visible_factors(topline, botline, win_height, opts)
   return factors
 end
 
+-- Fade factors for one window's viewport. The row under the window cursor —
+-- the highlighted item in every pane — is excluded so it keeps full colors
+-- even at the bottom of the fade zone.
+function M.window_factors(win, topline, botline, win_height)
+  local factors = M.visible_factors(topline, botline, win_height)
+  local ok, cursor = pcall(vim.api.nvim_win_get_cursor, win)
+  if ok then factors[cursor[1] - 1] = nil end
+  return factors
+end
+
 local function get_hl(name)
   if vim.api.nvim_get_hl then
     local ok, hl = pcall(vim.api.nvim_get_hl, 0, { name = name, link = false })
@@ -262,7 +272,7 @@ local function ensure_provider()
           })
         end
       end
-      views[win] = M.visible_factors(top + 1, bottom, height)
+      views[win] = M.window_factors(win, top + 1, bottom, height)
       return true
     end,
     on_line = function(_, win, buf, row)

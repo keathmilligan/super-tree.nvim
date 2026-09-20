@@ -54,7 +54,7 @@ local function run()
     string.format("9001 %d opencode2 opencode2", uid),
     string.format("9002 %d opencode2 opencode2 %s", uid, beta),
     string.format("9003 %d opencode2 opencode2 --continue", uid),
-    string.format("9004 %d opencode2 opencode2", uid),
+    string.format("9004 %d opencode opencode", uid),
     string.format("9010 %d opencode2.exe /opt/opencode2.exe serve --service", uid),
     string.format("9011 %d opencode2 opencode2 api get /api/session/active", uid),
     string.format("9012 %d opencode2 opencode2 run prompt", uid),
@@ -109,10 +109,15 @@ local function run()
   inject_provider()
   local flag_parsing = provider._parse_processes(table.concat({
     string.format("9020 %d opencode2 opencode2 --log-level debug --continue", uid),
-    string.format("9021 %d opencode2 opencode2 --log-level debug api get /api/session/active", uid),
+    string.format("9021 %d opencode2 opencode2 api get /api/session/active", uid),
+    string.format("9022 %d opencode opencode", uid),
+    string.format("9023 %d opencode opencode serve --service", uid),
+    string.format("9024 %d opencode opencode api get /api/session/active", uid),
+    string.format("9025 %d opencode opencode run prompt", uid),
+    string.format("9026 %d opencode opencode --log-level debug api get /api/session/active", uid),
   }, "\n"))
-  check(#flag_parsing == 1 and flag_parsing[1].pid == 9020,
-    "process parsing skips flag values before classifying the TUI subcommand")
+  check(#flag_parsing == 2 and flag_parsing[1].pid == 9020 and flag_parsing[2].pid == 9022,
+    "process parsing skips flag values, classifies subcommands, and accepts the release binary name")
   responses["/processes"] = process_fixture
   responses["/api/session/active"] = encode({
     data = {

@@ -237,7 +237,7 @@ On by default (`buffers.enable = false` to disable). Press `B` to toggle. The pa
 
 ### Fade
 
-The bottom of each pane darkens based on **window height**, not how many items are in the list. A short list in a tall pane stays full strength. Disable with `fade.enable = false`. `fade.zone` is the last fraction of the pane that fades (default `0.3`). `fade.bottom_opacity` is the opacity of an item sitting on the bottom row (default `0.25`).
+The bottom of each pane darkens based on **window height**, not how many items are in the list. A short list in a tall pane stays full strength. Disable with `fade.enable = false`. `fade.zone` is the last fraction of the pane that fades (default `0.3`). `fade.bottom_opacity` is the opacity of an item sitting on the bottom row (default `0.25`). The highlighted item under the pane cursor never fades.
 
 Independently, any line too wide for its pane — a file or project name, an agent's status, description, or model row, a buffer name — is truncated and fades out over its last three characters at the pane's right edge.
 

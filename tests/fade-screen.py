@@ -84,7 +84,10 @@ ICON = 0x00C0C0
 STATUS = 0xE0A060
 
 
-def shade(color, row, height, enabled=True):
+def shade(color, row, height, cursor_row=0, enabled=True):
+    # The item under the pane cursor (cursorline) is never faded.
+    if row == cursor_row:
+        return color
     # Specification: full brightness until 70% of the pane; 25% at its bottom.
     opacity = 1 if not enabled else min(1, 1 - 0.75 * (row / height - 0.7) / 0.3)
     opacity = math.floor(opacity * 20 + 0.5) / 20
@@ -102,17 +105,20 @@ def window_rows(nvim, screen, win):
 def check_tree(nvim, screen, label):
     screen.sync()
     win = nvim.exec_lua('return require("super-tree.window").sidebar_win')
+    info = nvim.call("getwininfo", win)[0]
+    # Screen row of the pane cursor; its item stays at full brightness.
+    cursor_row = nvim.api.win_get_cursor(win)[0] - info["topline"] + 1
     checked = 0
     for row, height, cells in window_rows(nvim, screen, win):
         text = "".join(c[0] for c in cells)
         context = f"{label}, screen row {row}/{height}"
         if "file-" in text:
-            screen.check_text(cells, "file-", shade(NORMAL, row, height), context)
-            screen.check_text(cells, "󰢱", shade(ICON, row, height), context)
+            screen.check_text(cells, "file-", shade(NORMAL, row, height, cursor_row), context)
+            screen.check_text(cells, "󰢱", shade(ICON, row, height, cursor_row), context)
             checked += 1
         elif "dir-" in text:
-            screen.check_text(cells, "dir-", shade(DIRECTORY, row, height), context)
-            screen.check_text(cells, "", shade(NORMAL, row, height), context)
+            screen.check_text(cells, "dir-", shade(DIRECTORY, row, height, cursor_row), context)
+            screen.check_text(cells, "", shade(NORMAL, row, height, cursor_row), context)
             checked += 1
     assert checked, f"{label}: no fixture entries visible"
 
@@ -123,7 +129,7 @@ def check_virtual(nvim, screen, wins, label, enabled=True):
         for row, height, cells in window_rows(nvim, screen, win):
             context = f"{label}, window {win}, row {row}/{height}"
             for text, color in (("plain", NORMAL), ("I", DIRECTORY), ("name", ICON), ("STATUS", STATUS)):
-                screen.check_text(cells, text, shade(color, row, height, enabled), context)
+                screen.check_text(cells, text, shade(color, row, height, enabled=enabled), context)
 
 
 def run(nvim, screen, root):

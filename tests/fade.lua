@@ -32,6 +32,21 @@ local function run()
     "configure updates the default fade")
   fade.configure()
 
+  -- The highlighted item under the pane cursor never fades.
+  local fbuf = vim.api.nvim_create_buf(false, true)
+  vim.api.nvim_buf_set_lines(fbuf, 0, -1, false, { "a", "b", "c", "d", "e", "f", "g", "h" })
+  local fwin = vim.api.nvim_open_win(fbuf, false,
+    { relative = "editor", row = 0, col = 0, width = 20, height = 8 })
+  vim.api.nvim_win_set_cursor(fwin, { 7, 0 })
+  local factors = fade.window_factors(fwin, 1, 8, 8)
+  check(factors[6] == nil, "the highlighted item under the cursor keeps full brightness")
+  check(math.abs((factors[7] or 0) - 0.25) < 1e-9, "items below the cursor row still fade")
+  vim.api.nvim_win_set_cursor(fwin, { 8, 0 })
+  factors = fade.window_factors(fwin, 1, 8, 8)
+  check(factors[6] ~= nil, "a row that is no longer highlighted fades again")
+  check(factors[7] == nil, "the newly highlighted row is exempt")
+  vim.api.nvim_win_close(fwin, true)
+
   vim.api.nvim_set_hl(0, "Directory", { fg = "#ffffff", bold = true })
   check(fade.group("Directory") == "Directory", "no factor keeps the original group")
   check(fade.group("Directory", 1) == "Directory", "full brightness keeps the original group")
