@@ -275,13 +275,6 @@ function M.render(buf)
   fade.attach(buf, { ns })
 
   if selected then M.set_cursor_by_id(selected.id) end
-  if window.agents_win and vim.api.nvim_win_is_valid(window.agents_win) then
-    local header = " Agents  " .. #M.entries
-    if M.search_pattern and M.search_pattern ~= "" then
-      header = " Agents  " .. #M.entries .. "/" .. #M.all .. '  "' .. M.search_pattern .. '"'
-    end
-    vim.wo[window.agents_win].statusline = header
-  end
 end
 
 function M._provider()

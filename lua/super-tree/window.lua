@@ -230,7 +230,7 @@ function M.create_floating_window(buf, width)
   vim.wo[win].wrap           = false
   vim.wo[win].scrolloff      = 0
   vim.wo[win].sidescrolloff  = 0
-  vim.wo[win].statusline     = ""
+  vim.wo[win].statusline     = " " -- An empty option falls back to Neovim's default.
   vim.wo[win].winhighlight   = WINHIGHLIGHT
 
   M.guard_window(win, buf)
@@ -322,7 +322,7 @@ local function lower_pane_anchor(pane)
   return M.sidebar_win
 end
 
-local function open_pane(pane, height, title)
+local function open_pane(pane, height)
   if not M.is_open() then return nil end
   local key = pane .. "_win"
   if M[key] and vim.api.nvim_win_is_valid(M[key]) then return M[pane .. "_buf"] end
@@ -343,7 +343,7 @@ local function open_pane(pane, height, title)
       border   = "none",
       zindex   = 40,
     })
-    apply_win_opts(M[key], { statusline = "" })
+    apply_win_opts(M[key], { statusline = " " })
     M.layout_floating_panes()
   else
     local current = vim.api.nvim_get_current_win()
@@ -360,7 +360,7 @@ local function open_pane(pane, height, title)
     -- Keep stacked panes at their height when other windows split or close
     -- ('equalalways'). The tree stays flexible and absorbs leftover space.
     -- winfixheight does not block <C-w>+/- or mouse resize.
-    apply_win_opts(M[key], { statusline = " " .. title, winfixwidth = true, winfixheight = true })
+    apply_win_opts(M[key], { statusline = " ", winfixwidth = true, winfixheight = true })
     vim.wo[M.sidebar_win].winfixheight = false
     pcall(vim.api.nvim_win_set_height, M[key], height)
     -- :split can equalize the whole column. Keep every existing pane's
@@ -404,7 +404,7 @@ local function close_pane(pane)
 end
 
 function M.open_agents_window(height)
-  return open_pane("agents", height, "Agents")
+  return open_pane("agents", height)
 end
 
 function M.close_agents_window()
@@ -412,7 +412,7 @@ function M.close_agents_window()
 end
 
 function M.open_buffers_window(height)
-  local buf = open_pane("buffers", height, "Buffers")
+  local buf = open_pane("buffers", height)
   M.buffers_visible = buf ~= nil
   return buf
 end
@@ -423,7 +423,7 @@ function M.close_buffers_window()
 end
 
 function M.open_projects_window(height)
-  return open_pane("projects", height, "Projects")
+  return open_pane("projects", height)
 end
 
 function M.close_projects_window()
@@ -494,7 +494,7 @@ function M.create_pinned_window(buf, width)
   vim.wo[win].sidescrolloff  = 0
   vim.wo[win].winfixwidth    = true
   vim.wo[win].winfixheight   = true
-  vim.wo[win].statusline     = " SuperTree"
+  vim.wo[win].statusline     = " " -- An empty option falls back to Neovim's default.
   vim.wo[win].winhighlight   = WINHIGHLIGHT
 
   M.guard_window(win, buf)

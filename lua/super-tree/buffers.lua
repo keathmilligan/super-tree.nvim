@@ -76,22 +76,6 @@ function M.render(buf, config)
   local all = M.all or M.entries
   M.entries = filter.filter_entries(all, M.search_pattern, M.use_fzy)
 
-  local total, shown, modified = #all, #M.entries, 0
-  for _, entry in ipairs(M.entries) do
-    if entry.modified then modified = modified + 1 end
-  end
-
-  local header = " Buffers  " .. shown
-  if M.search_pattern and M.search_pattern ~= "" then
-    header = " Buffers  " .. shown .. "/" .. total
-  end
-  if modified > 0 then
-    header = header .. "  +" .. modified
-  end
-  if M.search_pattern and M.search_pattern ~= "" then
-    header = header .. '  "' .. M.search_pattern .. '"'
-  end
-
   local lines = {}
   local icon_hl, name_hl, virt_marks, fade_marks = {}, {}, {}, {}
   local current = editor_bufnr()
@@ -188,10 +172,6 @@ function M.render(buf, config)
   vim.bo[buf].readonly   = true
   vim.bo[buf].modified   = false
   fade.attach(buf, { ns })
-
-  if window.buffers_win and vim.api.nvim_win_is_valid(window.buffers_win) then
-    vim.wo[window.buffers_win].statusline = header
-  end
 end
 
 return M

@@ -244,14 +244,6 @@ function M.render(buf)
   vim.bo[buf].readonly = true
   vim.bo[buf].modified = false
   fade.attach(buf, { ns })
-  if window.projects_win and vim.api.nvim_win_is_valid(window.projects_win) then
-    local total = #(M.all or M.entries)
-    local header = " Projects  " .. #M.entries
-    if M.search_pattern and M.search_pattern ~= "" then
-      header = " Projects  " .. #M.entries .. "/" .. total .. '  "' .. M.search_pattern .. '"'
-    end
-    vim.wo[window.projects_win].statusline = header
-  end
 end
 
 return M
