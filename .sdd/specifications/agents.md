@@ -1,14 +1,14 @@
 ---
 feature: agents
 created: 2026-09-18
-updated: 2026-09-19
+updated: 2026-09-20
 ---
 
 # Agents
 
 | Created | Updated |
 | --- | --- |
-| 2026-09-18 | 2026-09-19 |
+| 2026-09-18 | 2026-09-20 |
 
 ## Purpose
 
@@ -80,6 +80,15 @@ and that model information is unavailable.
 
 The pane header SHALL count agent entries rather than rendered rows.
 
+### Ordering
+
+By default, agents associated with the current project — a session or TUI
+working directory equal to or nested under the active project root — SHALL be
+listed first. Hoisted agents and all other agents SHALL each keep their
+existing relative order. When no project is active, or when
+`agents.current_project_first = false`, entries SHALL keep the provider's
+status-priority order.
+
 ### Pane visibility and refresh
 
 The Agents pane SHALL appear at its configured position in the pane order
@@ -132,7 +141,8 @@ Configuration SHALL support:
 - enabling or disabling Agents;
 - initial pane height, defaulting to 15 rows (five complete three-row entries);
 - refresh interval;
-- the OpenCode V2 executable, defaulting to `opencode2`; and
+- the OpenCode V2 executable, defaulting to `opencode2`;
+- current-project-first ordering, enabled by default; and
 - status symbols, including `running`, `idle`, and `unknown`.
 
 ## Change history
@@ -144,3 +154,4 @@ Configuration SHALL support:
 | 2026-09-18 | Added blocked permission and question prompt statuses |
 | 2026-09-18 | Distinguished idle, working, and completed TUI states and colors |
 | 2026-09-19 | Made pane position configurable and defaulted the pane to 15 rows |
+| 2026-09-20 | Added current-project-first Agents ordering |

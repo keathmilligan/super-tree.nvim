@@ -13,7 +13,7 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 - Three display modes: floating popup, pinned split, or persistent sidebar
 - Git status: per-file symbols, directory bubbling, multi-repo branch summaries, and a detailed root status line (branch, ahead/behind, stash, lines added/removed)
 - Projects pane at the top of the pane stack when [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) or [neovim-project](https://github.com/coffebar/neovim-project) has projects available; select a project to switch workspaces
-- Agents pane below Projects for working, blocked, questioning, done, and idle OpenCode V2 TUI instances, with colored status, project, description, agent/model details, and Super Project activation
+- Agents pane below Projects for working, blocked, questioning, done, and idle OpenCode V2 TUI instances, with colored status, project, description, agent/model details, current-project-first ordering, and Super Project activation
 - Buffers pane above the tree (independently scrollable and resizable; `B` to toggle)
 - Configurable top-to-bottom pane order (`pane_order`)
 - LSP diagnostic icons on files and directories (bubbled to parents)
@@ -139,6 +139,7 @@ require("super-tree").setup({
     height = 15, -- fits five three-row entries
     refresh_interval = 2000, -- milliseconds
     command = "opencode2",
+    current_project_first = true, -- list the current project's agents first
     symbols = {
       working = "●",
       blocked = "◉",
@@ -202,6 +203,8 @@ Each agent is a three-row entry:
 3. agent name plus model provider, model, and variant.
 
 `j` / `k` and the arrows move by agent rather than by display row. `<Enter>`, double-click, `l`, or `<Right>` on any of the three rows activates the workspace through super-project.nvim. If the OpenCode location is nested, SuperTree selects the longest registered project root containing it. Without Super Project, the pane remains usable but activation reports an error without changing the current workspace. `/` filters across status, project, description, agent, model, and path.
+
+Agents working in the current project (their session or TUI directory is the active project root or nested under it) are listed first; all other agents keep their existing order. Set `agents.current_project_first = false` to keep the plain status-priority order regardless of the current project.
 
 Set `agents.enable = false` to disable the provider, `agents.height` to change its initial height (default 15, which fits five three-row entries), `agents.refresh_interval` to change polling frequency, or `agents.command` to use an explicit OpenCode V2 executable path. Status symbols are configurable under `agents.symbols`; unknown future status values remain visible with neutral styling.
 

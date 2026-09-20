@@ -4,12 +4,14 @@ local root = vim.fn.tempname()
 local alpha = root .. "/alpha"
 local alpha_sub = alpha .. "/packages/app"
 local beta = root .. "/beta"
+local gamma = root .. "/gamma"
 local original_cwd = vim.fn.getcwd()
 local supertree = require("super-tree")
 local provider = require("super-tree.agent_providers.opencode")
 
 vim.fn.mkdir(alpha_sub, "p")
 vim.fn.mkdir(beta, "p")
+vim.fn.mkdir(gamma, "p")
 vim.fn.writefile({ "alpha" }, alpha .. "/file.txt")
 vim.fn.writefile({ "beta" }, beta .. "/file.txt")
 
@@ -46,11 +48,13 @@ local function run()
     [9001] = alpha,
     [9002] = beta,
     [9003] = alpha,
+    [9004] = gamma,
   }
   local process_fixture = table.concat({
     string.format("9001 %d opencode2 opencode2", uid),
     string.format("9002 %d opencode2 opencode2 %s", uid, beta),
     string.format("9003 %d opencode2 opencode2 --continue", uid),
+    string.format("9004 %d opencode2 opencode2", uid),
     string.format("9010 %d opencode2.exe /opt/opencode2.exe serve --service", uid),
     string.format("9011 %d opencode2 opencode2 api get /api/session/active", uid),
     string.format("9012 %d opencode2 opencode2 run prompt", uid),
@@ -144,7 +148,7 @@ local function run()
   } })
 
   local parsed = collect({ force = true })
-  check(parsed.ok and #parsed.value == 3, "provider returns matched active and idle TUI instances")
+  check(parsed.ok and #parsed.value == 4, "provider returns matched active and idle TUI instances")
   local by_pid = {}
   for _, entry in ipairs(parsed.value) do by_pid[entry.pid] = entry end
   check(by_pid[9001].session_id == "ses_alpha" and by_pid[9001].status == "blocked",
@@ -255,15 +259,16 @@ local function run()
     diagnostics = { enable = false },
     fade = { enable = false },
   })
+  local current_root = alpha
   supertree.register_project_provider("super-project", {
     manages_tree_state = true,
     projects = function()
       return {
-        { root = alpha, name = "alpha", rank = 2, active = true },
-        { root = beta, name = "beta", rank = 1 },
+        { root = alpha, name = "alpha", rank = 2, active = current_root == alpha },
+        { root = beta, name = "beta", rank = 1, active = current_root == beta },
       }
     end,
-    current = function() return { root = alpha } end,
+    current = function() return { root = current_root } end,
     open = function(path)
       if open_error then return false, open_error end
       opened = path
@@ -274,13 +279,21 @@ local function run()
   vim.cmd("edit " .. vim.fn.fnameescape(alpha .. "/file.txt"))
   supertree.open()
   local opened_agents = vim.wait(1500, function()
-    return window.agents_win ~= nil and #agents.all == 3
+    return window.agents_win ~= nil and #agents.all == 4
   end, 10)
   check(opened_agents, "TUI instances automatically open Agents (entries=" .. #agents.all
     .. ", refreshing=" .. tostring(agents._is_refreshing()) .. ")")
 
+  local function entry_pids()
+    local pids = {}
+    for _, entry in ipairs(agents.entries) do pids[#pids + 1] = tostring(entry.pid) end
+    return table.concat(pids, ",")
+  end
+  check(entry_pids() == "9001,9003,9002,9004",
+    "agents in the current project hoist to the top; other agents keep their order")
+
   local lines = vim.api.nvim_buf_get_lines(window.agents_buf, 0, -1, false)
-  check(#lines == 9, "three TUI instances render as nine content rows")
+  check(#lines == 12, "four TUI instances render as twelve content rows")
   check(lines[1]:find("◉ blocked", 1, true) and lines[1]:find("alpha", 1, true),
     "row one reflects a pending permission prompt")
   local blocked_marks = vim.api.nvim_buf_get_extmarks(
@@ -294,9 +307,16 @@ local function run()
   check(lines[2]:find("Implement alpha feature", 1, true), "row two shows description")
   check(lines[3]:find("build · opencode/gpt-5.6-sol · max", 1, true),
     "row three shows agent and model information")
-  check(lines[4]:find("? question", 1, true), "question request is reflected in the status row")
+  check(lines[4]:find("○ idle", 1, true), "TUI without a running agent renders as idle")
+  check(lines[5]:find("OpenCode TUI · PID 9003", 1, true), "idle TUI description identifies the instance")
+  check(lines[6]:find("no active agent · model unavailable", 1, true),
+    "idle TUI explains missing agent and model metadata")
+  check(lines[7]:find("? question", 1, true) and lines[7]:find("beta", 1, true),
+    "question request is reflected in the status row")
+  check(lines[10]:find("○ idle", 1, true) and lines[10]:find("gamma", 1, true),
+    "the other idle TUI keeps its position below the current project's agents")
   local question_marks = vim.api.nvim_buf_get_extmarks(
-    window.agents_buf, -1, { 3, 0 }, { 3, -1 }, { details = true }
+    window.agents_buf, -1, { 6, 0 }, { 6, -1 }, { details = true }
   )
   local question_hl
   for _, mark in ipairs(question_marks) do
@@ -311,10 +331,6 @@ local function run()
     "question status is blue")
   check(vim.api.nvim_get_hl(0, { name = "SuperTreeAgentDone", link = false }).fg == 0x98c379,
     "done status is green")
-  check(lines[7]:find("○ idle", 1, true), "TUI without a running agent renders as idle")
-  check(lines[8]:find("OpenCode TUI · PID 9003", 1, true), "idle TUI description identifies the instance")
-  check(lines[9]:find("no active agent · model unavailable", 1, true),
-    "idle TUI explains missing agent and model metadata")
 
   vim.api.nvim_win_set_cursor(window.agents_win, { 2, 0 })
   check(agents.entry_at_cursor().id == "opencode-tui:9001", "description row maps to its TUI")
@@ -328,10 +344,10 @@ local function run()
   key(window.agents_buf, "<CR>")
   check(opened == vim.fn.resolve(alpha), "Enter resolves a nested location to the closest project root")
   opened = nil
-  vim.api.nvim_win_set_cursor(window.agents_win, { 8, 0 })
+  vim.api.nvim_win_set_cursor(window.agents_win, { 5, 0 })
   key(window.agents_buf, "<CR>")
   check(opened == vim.fn.resolve(alpha), "idle TUI activation uses its process working directory")
-  vim.api.nvim_win_set_cursor(window.agents_win, { 6, 0 })
+  vim.api.nvim_win_set_cursor(window.agents_win, { 9, 0 })
   key(window.agents_buf, "<2-LeftMouse>")
   check(opened == vim.fn.resolve(beta), "double-click works from the model row")
 
@@ -339,7 +355,7 @@ local function run()
   check(#agents.entries == 1 and vim.api.nvim_buf_line_count(window.agents_buf) == 3,
     "Agents filter operates on entries, not individual rows")
   filter.clear("agents")
-  check(#agents.entries == 3 and vim.api.nvim_buf_line_count(window.agents_buf) == 9,
+  check(#agents.entries == 4 and vim.api.nvim_buf_line_count(window.agents_buf) == 12,
     "clearing Agents filter restores all rows")
 
   local refresh_calls = calls["/api/session/active"] or 0
@@ -366,7 +382,7 @@ local function run()
 
   -- State records a three-row selection, focus, and Agents height.
   vim.api.nvim_win_set_height(window.agents_win, 8)
-  vim.api.nvim_win_set_cursor(window.agents_win, { 6, 0 })
+  vim.api.nvim_win_set_cursor(window.agents_win, { 8, 0 })
   vim.api.nvim_set_current_win(window.agents_win)
   local state = supertree.capture_state()
   check(state.selected_agent == "opencode-tui:9002" and state.focused_pane == "agents",
@@ -379,6 +395,32 @@ local function run()
   check(agents.entry_at_cursor().id == "opencode-tui:9002",
     "state restores selection from any content row")
   check(vim.api.nvim_win_get_height(window.agents_win) == 8, "state restores Agents height")
+  supertree.close()
+
+  -- With hoisting disabled, Agents keeps the provider's status-priority order.
+  supertree.setup({ agents = { current_project_first = false } })
+  supertree.open()
+  wait_for(function() return window.agents_win ~= nil and #agents.entries == 4 end,
+    "Agents reopens with current_project_first disabled")
+  check(entry_pids() == "9001,9002,9003,9004",
+    "current_project_first = false keeps the provider's order")
+  supertree.close()
+
+  -- Hoisting follows the current project; unrelated agents never reorder.
+  supertree.setup({ agents = { current_project_first = true } })
+  supertree.open()
+  wait_for(function() return window.agents_win ~= nil and #agents.entries == 4 end,
+    "Agents reopens with current_project_first enabled")
+  check(entry_pids() == "9001,9003,9002,9004", "agents in the current project hoist")
+  current_root = beta
+  require("super-tree.projects").collect()
+  agents.render(window.agents_buf)
+  check(entry_pids() == "9002,9001,9003,9004",
+    "hoisting follows the current project; other agents keep their order")
+  current_root = alpha
+  require("super-tree.projects").collect()
+  agents.render(window.agents_buf)
+  check(entry_pids() == "9001,9003,9002,9004", "restoring the project restores the order")
   supertree.close()
 
   for _, mode in ipairs({ "pinned", "floating" }) do
@@ -409,13 +451,13 @@ local function run()
   responses["/api/session/active"] = encode({ data = {} })
   agents.refresh(true, true)
   wait_for(function()
-    if #agents.all ~= 3 then return false end
+    if #agents.all ~= 4 then return false end
     local counts = { done = 0, idle = 0 }
     for _, entry in ipairs(agents.all) do
       counts[entry.status] = (counts[entry.status] or 0) + 1
     end
-    return counts.done == 2 and counts.idle == 1
-  end, "completed TUIs become done while an initially inactive TUI stays idle")
+    return counts.done == 2 and counts.idle == 2
+  end, "completed TUIs become done while initially inactive TUIs stay idle")
   local completed
   for _, entry in ipairs(agents.all) do
     if entry.pid == 9001 then completed = entry end

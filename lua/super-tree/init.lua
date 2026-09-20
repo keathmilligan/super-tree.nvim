@@ -56,6 +56,9 @@ local config      = {
     height = 15, -- five three-row entries
     refresh_interval = 2000,
     command = "opencode2",
+    -- List agents working in the current project first; other agents keep
+    -- their existing order.
+    current_project_first = true,
     symbols = {
       working = "●",
       blocked = "◉",

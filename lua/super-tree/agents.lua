@@ -5,6 +5,7 @@
 local window   = require("super-tree.window")
 local filter   = require("super-tree.filter")
 local fade     = require("super-tree.fade")
+local projects = require("super-tree.projects")
 local opencode = require("super-tree.agent_providers.opencode")
 
 local M = {
@@ -191,10 +192,35 @@ local function model_line(entry)
   return table.concat(parts, " · ")
 end
 
+-- Stable partition moving entries whose session or TUI directory is the
+-- current project (or nested under it) to the top. Every other entry keeps
+-- its existing relative order.
+local function hoist_current_project(entries)
+  if config.current_project_first == false then return entries end
+  if #entries < 2 then return entries end
+  local root = projects.active_root()
+  if not root then return entries end
+  local prefix = root == "/" and "/" or root .. "/"
+  local function in_project(dir)
+    return type(dir) == "string" and (dir == root or dir:sub(1, #prefix) == prefix)
+  end
+  local matched, rest = {}, {}
+  for _, entry in ipairs(entries) do
+    if in_project(entry.directory) or in_project(entry.tui_directory) then
+      matched[#matched + 1] = entry
+    else
+      rest[#rest + 1] = entry
+    end
+  end
+  if #matched == 0 or #rest == 0 then return entries end
+  for _, entry in ipairs(rest) do matched[#matched + 1] = entry end
+  return matched
+end
+
 function M.render(buf)
   if not buf or not vim.api.nvim_buf_is_valid(buf) then return end
   local selected = M.entry_at_cursor()
-  M.entries = filter.filter_entries(M.all, M.search_pattern, M.use_fzy)
+  M.entries = hoist_current_project(filter.filter_entries(M.all, M.search_pattern, M.use_fzy))
   M.row_map = {}
 
   -- Keep a cell clear at the right edge, like the tree; over-wide rows fade

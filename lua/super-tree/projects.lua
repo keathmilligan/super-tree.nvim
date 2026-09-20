@@ -114,6 +114,13 @@ function M.collect()
   return M.all
 end
 
+-- Resolved root of the active project entry (the current workspace), or nil
+-- when no project is known.
+function M.active_root()
+  local active = active_entry(M.all)
+  return active and active.resolved or nil
+end
+
 function M.register_provider(name, value)
   assert(type(name) == "string" and name ~= "", "project provider name is required")
   assert(type(value) == "table", "project provider must be a table")
