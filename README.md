@@ -196,6 +196,8 @@ Automatically appears in its configured position while at least one full OpenCod
 
 Discovery polls every two seconds by default and hides the pane only when a successful snapshot contains neither a TUI nor an active session. `R` refreshes immediately. Linux uses `/proc` for each TUI's working directory; systems without `/proc` fall back to `lsof` when available.
 
+Sessions are matched to TUIs only when their resolved directories are equal. A TUI opened in a parent directory (such as your home directory) does not claim sessions in projects below it; those sessions remain separate entries with their own project metadata. Changing a TUI's working directory clears its retained completed-task details.
+
 Each agent is a three-row entry:
 
 1. colored status icon and text, then project name;

@@ -387,7 +387,7 @@ local function done_entry(tui, previous)
   entry.status = "done"
   entry.tui_directory = tui.directory
   entry.directory = entry.directory or tui.directory
-  entry.project = project_name(tui.directory)
+  entry.project = project_name(entry.directory)
   return update_searchable(entry)
 end
 
@@ -406,20 +406,6 @@ local STATUS_PRIORITY = {
 }
 local sort_entries
 
-local function match_score(tui_directory, session_directory)
-  if not tui_directory or not session_directory then return nil end
-  if tui_directory == session_directory then return 1000000 + #tui_directory end
-  local tui_prefix = tui_directory == "/" and "/" or tui_directory .. "/"
-  if session_directory:sub(1, #tui_prefix) == tui_prefix then
-    return 500000 + #tui_directory
-  end
-  local session_prefix = session_directory == "/" and "/" or session_directory .. "/"
-  if tui_directory:sub(1, #session_prefix) == session_prefix then
-    return 400000 + #session_directory
-  end
-  return nil
-end
-
 local function reconcile(tuis, active_entries, active_known)
   local entries = {}
   local used = {}
@@ -428,14 +414,19 @@ local function reconcile(tuis, active_entries, active_known)
 
   for _, tui in ipairs(tuis) do
     live_pids[tui.pid] = true
-    local best_index, best_score
+    local previous = tui_history[tui.pid]
+    if previous and previous.tui_directory ~= tui.directory then
+      tui_history[tui.pid] = nil
+      previous = nil
+    end
+    local best_index
     if active_known then
       for index, entry in ipairs(active_entries) do
-        if not used[index] then
-          local score = match_score(tui.directory, entry.directory)
-          if score and (not best_score or score > best_score) then
-            best_index, best_score = index, score
-          end
+        -- An ancestor (especially $HOME) does not establish a session's
+        -- project. Keep sessions with different locations as separate entries.
+        if not used[index] and tui.directory == entry.directory then
+          best_index = index
+          break
         end
       end
     end
@@ -448,12 +439,10 @@ local function reconcile(tuis, active_entries, active_known)
       entry.pid = tui.pid
       entry.tui_directory = tui.directory
       entry.directory = entry.directory or tui.directory
-      entry.project = project_name(tui.directory)
       entry = update_searchable(entry)
       tui_history[tui.pid] = vim.deepcopy(entry)
       entries[#entries + 1] = entry
     else
-      local previous = tui_history[tui.pid]
       if active_known and previous then
         entries[#entries + 1] = done_entry(tui, previous)
       else

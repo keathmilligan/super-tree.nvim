@@ -130,7 +130,7 @@ local function run()
     title = "Implement alpha feature",
     agent = "build",
     model = { providerID = "opencode", id = "gpt-5.6-sol", variant = "max" },
-    location = { directory = alpha_sub },
+    location = { directory = alpha },
   } })
   responses["/api/session/ses_beta"] = encode({ data = {
     id = "ses_beta",
@@ -209,6 +209,59 @@ local function run()
       and fallback.value[1].model == "model unavailable",
     "bad details receive stable display fallbacks")
 
+  -- A parent-directory TUI must never claim another project's session, even
+  -- when its PID sorts before the TUI actually in that project.
+  provider._reset()
+  inject_provider()
+  process_cwds[9001] = root
+  responses["/processes"] = process_fixture
+  responses["/api/session/active"] = encode({ data = { ses_beta = { type = "running" } } })
+  local scoped = collect({ force = true })
+  by_pid = {}
+  for _, entry in ipairs(scoped.value) do by_pid[entry.pid] = entry end
+  check(by_pid[9001].status == "idle" and by_pid[9001].session_id == nil,
+    "parent-directory TUI does not claim a descendant project's session")
+  check(by_pid[9002].session_id == "ses_beta" and by_pid[9002].project == "beta",
+    "session metadata stays attached to the TUI in its own project")
+
+  -- Cached task details belong to the observed directory, not just the PID.
+  responses["/api/session/active"] = encode({ data = {} })
+  process_cwds[9002] = gamma
+  local moved = collect({ force = true })
+  for _, entry in ipairs(moved.value) do
+    if entry.pid == 9002 then
+      check(entry.status == "idle" and entry.session_id == nil and entry.project == "gamma",
+        "changing project clears completed-session metadata")
+    end
+  end
+  process_cwds[9002] = beta
+  local returned = collect({ force = true })
+  for _, entry in ipairs(returned.value) do
+    if entry.pid == 9002 then
+      check(entry.status == "idle" and entry.session_id == nil,
+        "returning to an old directory does not resurrect stale metadata")
+    end
+  end
+
+  -- Nested locations remain visible under their own session directory, and a
+  -- TUI inside a session's directory cannot claim the ancestor session either.
+  process_cwds[9001] = alpha_sub
+  responses["/processes"] = process_fixture:match("[^\n]+")
+  responses["/api/session/active"] = encode({ data = { ses_alpha = { type = "running" } } })
+  local ancestor = collect({ force = true })
+  check(#ancestor.value == 2, "ancestor session and nested TUI remain separate")
+  process_cwds[9001] = root
+  local descendant = collect({ force = true })
+  check(#descendant.value == 2, "descendant session remains visible without an exact TUI match")
+  local session
+  for _, entry in ipairs(descendant.value) do
+    if entry.session_id == "ses_alpha" then session = entry end
+  end
+  check(session and session.instance == "session" and session.project == "alpha"
+      and session.directory == alpha and session.pid == nil,
+    "unmatched session keeps its authoritative project and directory")
+  process_cwds[9001] = alpha
+
   -- UI fixture with two agents and a native Super Project provider.
   provider._reset()
   inject_provider()
@@ -224,7 +277,7 @@ local function run()
     title = "Implement alpha feature",
     agent = "build",
     model = { providerID = "opencode", id = "gpt-5.6-sol", variant = "max" },
-    location = { directory = alpha_sub },
+    location = { directory = alpha },
   } })
   responses["/api/session/ses_beta"] = encode({ data = {
     id = "ses_beta",
@@ -347,7 +400,10 @@ local function run()
 
   vim.api.nvim_win_set_cursor(window.agents_win, { 2, 0 })
   key(window.agents_buf, "<CR>")
-  check(opened == vim.fn.resolve(alpha), "Enter resolves a nested location to the closest project root")
+  check(opened == vim.fn.resolve(alpha), "Enter activates the session's project")
+  opened = nil
+  require("super-tree.projects").open_path(alpha_sub)
+  check(opened == vim.fn.resolve(alpha), "nested location resolves to the closest project root")
   opened = nil
   vim.api.nvim_win_set_cursor(window.agents_win, { 5, 0 })
   key(window.agents_buf, "<CR>")
