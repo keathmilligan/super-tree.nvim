@@ -38,6 +38,7 @@ local DEFAULT_SYMBOLS = {
   succeeded = "✓",
   error = "✕",
   failed = "✕",
+  none = "–",
   unknown = "?",
 }
 
@@ -52,7 +53,13 @@ local STATUS_HIGHLIGHTS = {
   succeeded = "SuperTreeAgentDone",
   error = "SuperTreeAgentError",
   failed = "SuperTreeAgentError",
+  none = "SuperTreeAgentNone",
   unknown = "SuperTreeAgentUnknown",
+}
+
+-- Displayed text for statuses whose key is not the label itself.
+local STATUS_LABELS = {
+  none = "no status",
 }
 
 local function status_key(status)
@@ -233,7 +240,7 @@ function M.render(buf)
   for index, entry in ipairs(M.entries) do
     local key = status_key(entry.status)
     local icon = status_symbols[entry.status] or status_symbols[key] or status_symbols.unknown
-    local status = entry.status or "unknown"
+    local status = STATUS_LABELS[entry.status] or entry.status or "unknown"
     local rows = {
       " " .. icon .. " " .. status .. "  " .. (entry.project or "unknown project"),
       "   " .. (entry.description or entry.title or "OpenCode session"),

@@ -1,11 +1,14 @@
--- OpenCode V2 agent discovery. Uses `opencode2 api` so service discovery and
--- authentication stay owned by OpenCode rather than being duplicated here.
+-- OpenCode V2 agent discovery. Queries the shared background service directly
+-- over HTTP using its registration file, the same discovery contract as
+-- `@opencode/client`'s `Service.discover()`. SuperTree never starts the
+-- service; when it is not running, TUIs are reported without a status.
 
 local M = {}
 
 local detail_cache = {}
 local tui_history = {}
 local injected_runner
+local injected_http
 local injected_cwd_resolver
 
 local function decode_json(text)
@@ -57,7 +60,7 @@ local function default_runner(argv, opts, callback)
         finish(true, table.concat(stdout, "\n"))
       else
         local message = table.concat(stderr, "\n")
-        if message == "" then message = "OpenCode API exited with code " .. tostring(code) end
+        if message == "" then message = argv[1] .. " exited with code " .. tostring(code) end
         finish(false, message)
       end
     end,
@@ -69,7 +72,7 @@ local function default_runner(argv, opts, callback)
   job = result
 
   if type(job) ~= "number" or job <= 0 then
-    finish(false, "could not start OpenCode V2")
+    finish(false, "could not start " .. tostring(argv[1]))
     return function() end
   end
 
@@ -79,7 +82,7 @@ local function default_runner(argv, opts, callback)
     timer:start(timeout, 0, function()
       vim.schedule(function()
         if finished then return end
-        finish(false, "OpenCode API request timed out")
+        finish(false, tostring(argv[1]) .. " timed out")
         pcall(vim.fn.jobstop, job)
       end)
     end)
@@ -93,69 +96,255 @@ local function default_runner(argv, opts, callback)
   end
 end
 
-local function command_argv(command, path)
-  return { command, "api", "get", path }
+local function run_text(argv, timeout, callback)
+  local runner = injected_runner or default_runner
+  return runner(argv, { timeout = timeout }, callback)
 end
 
-local DEFAULT_COMMANDS = {
-  opencode = true,
-  ["opencode.exe"] = true,
-  opencode2 = true,
-  ["opencode2.exe"] = true,
-}
+local BASE64 = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/"
 
--- Neovim launched from a desktop session often does not inherit the
--- `~/.opencode/bin` PATH entry that the V2 installer adds to shell rc files.
--- An explicit configured command that is missing still fails; only the default
--- CLI names fall back to the official install directory.
-local function resolve_command(command)
-  command = command or "opencode2"
-  if vim.fn.executable(command) == 1 then
-    local found = vim.fn.exepath(command)
-    if type(found) == "string" and found ~= "" then return found end
-    return command
+local function base64(text)
+  local out = {}
+  for i = 1, #text, 3 do
+    local a, b, c = text:byte(i, i + 2)
+    local n = a * 65536 + (b or 0) * 256 + (c or 0)
+    local d1 = math.floor(n / 262144) % 64
+    local d2 = math.floor(n / 4096) % 64
+    local d3 = math.floor(n / 64) % 64
+    local d4 = n % 64
+    out[#out + 1] = BASE64:sub(d1 + 1, d1 + 1) .. BASE64:sub(d2 + 1, d2 + 1)
+      .. (b and BASE64:sub(d3 + 1, d3 + 1) or "=")
+      .. (c and BASE64:sub(d4 + 1, d4 + 1) or "=")
   end
-  local name = command:match("([^/\\]+)$") or command
-  if not DEFAULT_COMMANDS[name] then return nil end
-  local home = vim.env.HOME
-  if type(home) ~= "string" or home == "" then
-    home = vim.fn.expand("~")
+  return table.concat(out)
+end
+
+local function service_file(config)
+  if type(config.service_file) == "string" and config.service_file ~= "" then
+    return vim.fn.expand(config.service_file)
   end
-  if type(home) ~= "string" or home == "" or home == "~" then return nil end
-  local candidates = {
-    home .. "/.opencode/bin/" .. name,
-    home .. "/.opencode/bin/opencode2",
-    home .. "/.opencode/bin/opencode",
+  local state = vim.env.XDG_STATE_HOME
+  if type(state) ~= "string" or state == "" then
+    local home = vim.env.HOME
+    if type(home) ~= "string" or home == "" then home = vim.fn.expand("~") end
+    state = home .. "/.local/state"
+  end
+  return state .. "/opencode/service.json"
+end
+
+local function parse_url(url)
+  if type(url) ~= "string" then return nil end
+  local rest = url:match("^[hH][tT][tT][pP]://(.*)$")
+  if not rest then return nil end
+  local authority = rest:match("^([^/?#]*)")
+  local host, port = authority:match("^%[([^%]]+)%]:?(%d*)$")
+  if not host then host, port = authority:match("^([^:@]+):?(%d*)$") end
+  if not host or host == "" then return nil end
+  local base = rest:sub(#authority + 1):match("^([^?#]*)"):gsub("/+$", "")
+  return {
+    host = host,
+    port = tonumber(port) or 80,
+    authority = authority,
+    base = base,
   }
-  local seen = {}
-  for _, path in ipairs(candidates) do
-    if not seen[path] then
-      seen[path] = true
-      if vim.fn.executable(path) == 1 then return path end
+end
+
+local NOT_REGISTERED = "OpenCode server is not running"
+
+-- Read the shared service registration. The service rewrites this file
+-- whenever it restarts, so it is read once per collection.
+local function read_endpoint(path)
+  local uv = vim.loop
+  local fd = uv.fs_open(path, "r", 438)
+  if not fd then return nil, NOT_REGISTERED end
+  local stat = uv.fs_fstat(fd)
+  local data = stat and uv.fs_read(fd, stat.size, 0)
+  uv.fs_close(fd)
+  local info = type(data) == "string" and decode_json(data)
+  if type(info) ~= "table" then return nil, "invalid OpenCode service registration" end
+  local endpoint = parse_url(info.url)
+  if not endpoint then return nil, "unsupported OpenCode service URL" end
+  if type(info.password) == "string" then
+    endpoint.authorization = "Basic " .. base64("opencode:" .. info.password)
+  end
+  return endpoint
+end
+
+-- Parse a buffered HTTP/1.1 response. Returns "incomplete", "error" plus a
+-- message, or "done" plus the status code and decoded body.
+local function parse_response(data, eof)
+  local head_end = data:find("\r\n\r\n", 1, true)
+  if not head_end then
+    if eof then return "error", "truncated HTTP response" end
+    return "incomplete"
+  end
+  local head = data:sub(1, head_end - 1)
+  local body = data:sub(head_end + 4)
+  local status = tonumber(head:match("^HTTP/%d[%.%d]*%s+(%d%d%d)"))
+  if not status then return "error", "invalid HTTP response" end
+  local headers = {}
+  for line in head:gmatch("\r\n([^\r\n]*)") do
+    local name, value = line:match("^([^:]+):%s*(.-)%s*$")
+    if name then headers[name:lower()] = value end
+  end
+
+  local encoding = headers["transfer-encoding"]
+  if encoding and encoding:lower():find("chunked", 1, true) then
+    local parts, pos = {}, 1
+    while true do
+      local line_end = body:find("\r\n", pos, true)
+      if not line_end then break end
+      local size = tonumber(body:sub(pos, line_end - 1):match("^%x+") or "", 16)
+      if not size then return "error", "invalid chunked HTTP response" end
+      if size == 0 then return "done", status, table.concat(parts) end
+      local start = line_end + 2
+      if #body < start + size + 1 then break end
+      parts[#parts + 1] = body:sub(start, start + size - 1)
+      pos = start + size + 2
+    end
+    if eof then return "error", "truncated HTTP response" end
+    return "incomplete"
+  end
+
+  local length = tonumber(headers["content-length"])
+  if length then
+    if #body >= length then return "done", status, body:sub(1, length) end
+    if eof then return "error", "truncated HTTP response" end
+    return "incomplete"
+  end
+  if eof then return "done", status, body end
+  return "incomplete"
+end
+
+-- Minimal HTTP/1.1 GET over libuv for the local service endpoint.
+-- callback(true, { status, body }) or callback(false, message, not_running),
+-- where `not_running` marks a registered service that no longer accepts
+-- connections (its registration file outlives it).
+local function default_http(endpoint, path, opts, callback)
+  local uv = vim.loop
+  opts = opts or {}
+  local finished = false
+  local cancelled = false
+  local tcp, timer
+  local buffer = ""
+
+  local function cleanup()
+    if timer and not timer:is_closing() then
+      timer:stop()
+      timer:close()
+    end
+    timer = nil
+    if tcp and not tcp:is_closing() then tcp:close() end
+  end
+
+  local function finish(ok, value, not_running)
+    if finished then return end
+    finished = true
+    cleanup()
+    vim.schedule(function()
+      if not cancelled then callback(ok, value, not_running) end
+    end)
+  end
+
+  local function handle(eof)
+    local state, a, b = parse_response(buffer, eof)
+    if state == "done" then
+      finish(true, { status = a, body = b })
+    elseif state == "error" then
+      finish(false, a)
     end
   end
-  return nil
-end
 
-local function run_json(command, path, timeout, callback)
-  local runner = injected_runner or default_runner
-  return runner(command_argv(command, path), { timeout = timeout }, function(ok, output)
-    if not ok then
-      callback(false, output)
+  local lines = {
+    "GET " .. endpoint.base .. path .. " HTTP/1.1",
+    "Host: " .. endpoint.authority,
+    "Accept: application/json",
+  }
+  if endpoint.authorization then
+    lines[#lines + 1] = "Authorization: " .. endpoint.authorization
+  end
+  lines[#lines + 1] = "Connection: close"
+  local request = table.concat(lines, "\r\n") .. "\r\n\r\n"
+
+  local function connect(address)
+    if finished then return end
+    tcp = uv.new_tcp()
+    if not tcp then
+      finish(false, "could not create OpenCode service connection", true)
       return
     end
-    local value, err = decode_json(output)
+    local ok, err = pcall(tcp.connect, tcp, address, endpoint.port, function(connect_err)
+      if finished then return end
+      if connect_err then
+        finish(false, "could not connect to OpenCode service: " .. tostring(connect_err), true)
+        return
+      end
+      tcp:write(request)
+      tcp:read_start(function(read_err, chunk)
+        if finished then return end
+        if read_err then
+          finish(false, "OpenCode service read failed: " .. tostring(read_err))
+        elseif chunk then
+          buffer = buffer .. chunk
+          handle(false)
+        else
+          handle(true)
+        end
+      end)
+    end)
+    if not ok then
+      finish(false, "could not connect to OpenCode service: " .. tostring(err), true)
+    end
+  end
+
+  local host = endpoint.host
+  if host:match("^%d+%.%d+%.%d+%.%d+$") or host:find(":", 1, true) then
+    connect(host)
+  else
+    uv.getaddrinfo(host, tostring(endpoint.port), { socktype = "stream" }, function(err, results)
+      if err or type(results) ~= "table" or not results[1] then
+        finish(false, "could not resolve OpenCode service host: " .. tostring(err or host), true)
+      else
+        connect(results[1].addr)
+      end
+    end)
+  end
+
+  local timeout = math.max(100, tonumber(opts.timeout) or 5000)
+  timer = uv.new_timer()
+  if timer then
+    timer:start(timeout, 0, function()
+      finish(false, "OpenCode API request timed out")
+    end)
+  end
+
+  return function()
+    cancelled = true
+    if finished then return end
+    finished = true
+    cleanup()
+  end
+end
+
+local function http_json(endpoint, path, timeout, callback)
+  local requester = injected_http or default_http
+  return requester(endpoint, path, { timeout = timeout }, function(ok, response, not_running)
+    if not ok then
+      callback(false, response, not_running)
+      return
+    end
+    local status = type(response) == "table" and tonumber(response.status) or nil
+    if not status or status < 200 or status >= 300 then
+      callback(false, "OpenCode API returned HTTP " .. tostring(status))
+      return
+    end
+    local value, err = decode_json(response.body)
     if not value then
       callback(false, err)
       return
     end
     callback(true, value)
   end)
-end
-
-local function run_text(argv, timeout, callback)
-  local runner = injected_runner or default_runner
-  return runner(argv, { timeout = timeout }, callback)
 end
 
 local function normalize_path(path)
@@ -340,7 +529,7 @@ end
 
 local function prompted_status(base, pending)
   if pending.permission then return "blocked" end
-  if pending.question or pending.form then return "question" end
+  if pending.form then return "question" end
   return base
 end
 
@@ -363,7 +552,7 @@ end
 
 local function update_searchable(entry)
   entry.name = table.concat({
-    entry.status or "unknown",
+    entry.status == "none" and "no status" or entry.status or "unknown",
     entry.project or "unknown project",
     entry.title or "",
     entry.agent or "",
@@ -403,7 +592,9 @@ end
 
 local function idle_entry(tui, status)
   local title = "OpenCode TUI · PID " .. tostring(tui.pid)
-  local unavailable = status == "unknown" and "agent status unavailable" or "no active agent"
+  local unavailable = status == "unknown" and "agent status unavailable"
+    or status == "none" and "OpenCode server not running"
+    or "no active agent"
   return update_searchable({
     id = "opencode-tui:" .. tostring(tui.pid),
     instance = "tui",
@@ -442,15 +633,21 @@ local STATUS_PRIORITY = {
   succeeded = 4,
   error = 5,
   failed = 5,
+  none = 8,
   unknown = 9,
 }
 local sort_entries
 
-local function reconcile(tuis, active_entries, active_known)
+-- `sessions` is "known" when active sessions were fetched, "unknown" when the
+-- query failed, and "offline" when the OpenCode server is not running.
+local function reconcile(tuis, active_entries, sessions)
   local entries = {}
   local used = {}
   local live_pids = {}
+  local active_known = sessions == "known"
   table.sort(tuis, function(a, b) return a.pid < b.pid end)
+  -- Sessions do not survive the server, so completed-task metadata is stale.
+  if sessions == "offline" then tui_history = {} end
 
   for _, tui in ipairs(tuis) do
     live_pids[tui.pid] = true
@@ -486,7 +683,8 @@ local function reconcile(tuis, active_entries, active_known)
       if active_known and previous then
         entries[#entries + 1] = done_entry(tui, previous)
       else
-        entries[#entries + 1] = idle_entry(tui, active_known and "idle" or "unknown")
+        local status = active_known and "idle" or (sessions == "offline" and "none" or "unknown")
+        entries[#entries + 1] = idle_entry(tui, status)
       end
     end
   end
@@ -521,8 +719,6 @@ end
 function M.collect(config, opts, callback)
   config = config or {}
   opts = opts or {}
-  local configured_command = config.command or "opencode2"
-  local command = configured_command
   local timeout = tonumber(config.timeout) or 5000
   local refresh_age = tonumber(config.metadata_refresh_interval) or 30000
   local cancelled = false
@@ -536,6 +732,7 @@ function M.collect(config, opts, callback)
   local sessions_ok = false
   local session_entries = {}
   local session_error
+  local sessions_offline = false
 
   local function add_handle(handle)
     if type(handle) == "function" then handles[#handles + 1] = handle end
@@ -550,9 +747,9 @@ function M.collect(config, opts, callback)
   local function finish_if_ready()
     if cancelled or finished or not processes_done or not sessions_done then return end
     if processes_ok and sessions_ok then
-      finish(true, reconcile(processes, session_entries, true))
+      finish(true, reconcile(processes, session_entries, sessions_offline and "offline" or "known"))
     elseif processes_ok and #processes > 0 then
-      finish(true, reconcile(processes, {}, false))
+      finish(true, reconcile(processes, {}, "unknown"))
     elseif sessions_ok and #session_entries > 0 then
       sort_entries(session_entries)
       finish(true, session_entries)
@@ -576,13 +773,30 @@ function M.collect(config, opts, callback)
     finish_if_ready()
   end
 
-  local resolved = resolve_command(configured_command)
-  if resolved then command = resolved end
-  if not injected_runner and not resolved then
-    fail_sessions(configured_command .. " is not executable")
-  else
-    add_handle(run_json(command, "/api/session/active", timeout, function(ok, response)
+  -- The server not running is a definite state rather than a failure: TUIs
+  -- remain visible without a status, and no session can be active.
+  local function server_offline()
+    detail_cache = {}
+    sessions_done = true
+    sessions_ok = true
+    sessions_offline = true
+    session_entries = {}
+    finish_if_ready()
+  end
+
+  local endpoint, endpoint_error = read_endpoint(service_file(config))
+
+  local function request(path, handler)
+    return http_json(endpoint, path, timeout, handler)
+  end
+
+  local function fetch_active()
+    add_handle(request("/api/session/active", function(ok, response, not_running)
       if cancelled then return end
+      if not ok and not_running then
+        server_offline()
+        return
+      end
       if not ok then
         fail_sessions(response)
         return
@@ -644,7 +858,7 @@ function M.collect(config, opts, callback)
           details[id] = cached.value
         else
           pending = pending + 1
-          add_handle(run_json(command, "/api/session/" .. id, timeout, function(detail_ok, payload)
+          add_handle(request("/api/session/" .. id, function(detail_ok, payload)
             if cancelled then return end
             if detail_ok and type(payload.data) == "table" then
               details[id] = payload.data
@@ -659,13 +873,12 @@ function M.collect(config, opts, callback)
 
         local prompt_paths = {
           permission = "/api/session/" .. id .. "/permission",
-          question = "/api/session/" .. id .. "/question",
           form = "/api/session/" .. id .. "/form",
         }
         for kind, path in pairs(prompt_paths) do
           local prompt_kind = kind
           pending = pending + 1
-          add_handle(run_json(command, path, timeout, function(prompt_ok, payload)
+          add_handle(request(path, function(prompt_ok, payload)
             if cancelled then return end
             if prompt_ok then prompts[id][prompt_kind] = has_pending(payload) end
             pending = pending - 1
@@ -676,6 +889,14 @@ function M.collect(config, opts, callback)
       launching = false
       complete_if_ready()
     end))
+  end
+
+  if endpoint then
+    fetch_active()
+  elseif endpoint_error == NOT_REGISTERED then
+    server_offline()
+  else
+    fail_sessions(endpoint_error)
   end
 
   return function()
@@ -690,6 +911,10 @@ function M._set_runner(runner)
   injected_runner = runner
 end
 
+function M._set_http(requester)
+  injected_http = requester
+end
+
 function M._set_cwd_resolver(resolver)
   injected_cwd_resolver = resolver
 end
@@ -698,8 +923,12 @@ function M._parse_processes(output)
   return parse_processes(output)
 end
 
+M._http_get = default_http
+M._read_endpoint = read_endpoint
+
 function M._reset()
   injected_runner = nil
+  injected_http = nil
   injected_cwd_resolver = nil
   detail_cache = {}
   tui_history = {}

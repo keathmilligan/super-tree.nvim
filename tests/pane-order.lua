@@ -51,19 +51,21 @@ local function run()
   end
   local process_fixture = table.concat(process_lines, "\n")
   provider._reset()
-  provider._set_runner(function(argv, _, callback)
+  provider._set_runner(function(_, _, callback)
     local cancelled = false
     vim.schedule(function()
-      if cancelled then return end
-      if argv[1] == "ps" then
-        callback(true, process_fixture)
-      elseif argv[4] == "/api/session/active" then
-        callback(true, vim.json.encode({ data = {} }))
-      else
-        callback(true, "{}")
-      end
+      if not cancelled then callback(true, process_fixture) end
     end)
     return function() cancelled = true end
+  end)
+  local service_file = root .. "/service.json"
+  vim.fn.writefile({ vim.json.encode({ url = "http://127.0.0.1:1", password = "x" }) }, service_file)
+  provider._set_http(function(_, path, _, callback)
+    vim.schedule(function()
+      local body = path == "/api/session/active" and vim.json.encode({ data = {} }) or "{}"
+      callback(true, { status = 200, body = body })
+    end)
+    return function() end
   end)
   provider._set_cwd_resolver(function() return alpha end)
 
@@ -78,7 +80,7 @@ local function run()
 
   local function open_with(opts)
     local base = {
-      agents = { enable = true, refresh_interval = 60000, command = "fixture" },
+      agents = { enable = true, refresh_interval = 60000, service_file = service_file },
       projects = { enable = true },
       buffers = { enable = true },
       git = { enable = false },

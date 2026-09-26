@@ -55,7 +55,6 @@ local config      = {
     enable = true,
     height = 15, -- five three-row entries
     refresh_interval = 2000,
-    command = "opencode2",
     -- List agents working in the current project first; other agents keep
     -- their existing order.
     current_project_first = true,
@@ -65,6 +64,7 @@ local config      = {
       question = "?",
       idle = "○",
       done = "✓",
+      none = "–", -- OpenCode server not running
       unknown = "?",
     },
   },
@@ -837,6 +837,7 @@ local function define_highlights()
   vim.api.nvim_set_hl(0, "SuperTreeAgentDone", { fg = "#98c379", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeAgentError", { link = "DiagnosticError", default = true })
   vim.api.nvim_set_hl(0, "SuperTreeAgentUnknown", { link = "Comment", default = true })
+  vim.api.nvim_set_hl(0, "SuperTreeAgentNone", { link = "Comment", default = true })
   local special = vim.api.nvim_get_hl(0, { name = "Special", link = false })
   local current_item = { bold = true, default = true }
   if special.fg then current_item.fg = special.fg end

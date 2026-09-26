@@ -1,14 +1,14 @@
 ---
 feature: agents
 created: 2026-09-18
-updated: 2026-09-22
+updated: 2026-09-26
 ---
 
 # Agents
 
 | Created | Updated |
 | --- | --- |
-| 2026-09-18 | 2026-09-22 |
+| 2026-09-18 | 2026-09-26 |
 
 ## Purpose
 
@@ -22,16 +22,26 @@ When enabled, SuperTree SHALL detect live full OpenCode V2 TUI instances owned
 by the current user. Background services and non-TUI commands such as `api`,
 `run`, `mini`, and `serve` SHALL NOT appear as TUI instances.
 
+SuperTree SHALL query sessions directly from the shared OpenCode V2 background
+service over HTTP, using the endpoint and credentials from its service
+registration file, without spawning an OpenCode process. SuperTree SHALL NOT
+start the service.
+
 SuperTree SHALL reconcile TUI instances with active OpenCode V2 sessions:
 
 - A TUI matched to a `running` active session SHALL show `working`.
 - A pending permission request SHALL override an active status with `blocked`.
-- A pending question or form SHALL override an active status with `question`.
+- A pending form (the V2 representation of interactive questions) SHALL
+  override an active status with `question`.
 - A newly detected TUI without a matched active session SHALL show `idle`.
 - When a previously active TUI no longer has an active session, it SHALL show
   `done` and retain its last session metadata until new work starts or the TUI
   exits.
 - An active session without a matched TUI SHALL remain visible.
+- While the OpenCode V2 server is not running (no service registration, or the
+  registered endpoint refuses connections), each detected TUI SHALL show a
+  `no status` indication that states the server is not running, and no
+  completed-session metadata SHALL be retained.
 - A historical session without a live TUI and without active work SHALL NOT be
   shown.
 
@@ -103,7 +113,8 @@ a background refresh SHALL NOT take focus from another valid window.
 If all discovery sources fail, SuperTree SHALL retain the last usable snapshot.
 If process discovery succeeds but active-session discovery fails, detected TUIs
 SHALL remain visible with an unknown status rather than being removed or
-incorrectly marked idle.
+incorrectly marked idle. A server that is not running is not a discovery
+failure; it produces the `no status` indication instead.
 
 ### Navigation and filtering
 
@@ -141,12 +152,10 @@ Configuration SHALL support:
 - enabling or disabling Agents;
 - initial pane height, defaulting to 15 rows (five complete three-row entries);
 - refresh interval;
-- the OpenCode V2 executable, defaulting to `opencode2`. When that default
-  name (or `opencode`) is not on `PATH`, SuperTree SHALL also try
-  `~/.opencode/bin`. An explicit configured command that cannot be executed
-  SHALL still fail rather than falling back;
+- the OpenCode V2 service registration file, defaulting to
+  `$XDG_STATE_HOME/opencode/service.json` (`~/.local/state/opencode/service.json`);
 - current-project-first ordering, enabled by default; and
-- status symbols, including `running`, `idle`, and `unknown`.
+- status symbols, including `running`, `idle`, `none` (no status), and `unknown`.
 
 ## Change history
 
@@ -159,3 +168,4 @@ Configuration SHALL support:
 | 2026-09-19 | Made pane position configurable and defaulted the pane to 15 rows |
 | 2026-09-20 | Added current-project-first Agents ordering |
 | 2026-09-22 | Resolve the default OpenCode CLI from `~/.opencode/bin` when it is not on `PATH` |
+| 2026-09-26 | Query the OpenCode server directly over HTTP; removed the CLI; `no status` while the server is not running |

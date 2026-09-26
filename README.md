@@ -24,7 +24,7 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 - Neovim 0.8+
 - Nerd Font
 - `git` in `$PATH` (for git status)
-- `opencode2` in `$PATH`, or the standard `~/.opencode/bin` install (optional; for the Agents pane)
+- OpenCode V2 (optional; for the Agents pane)
 - [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) (optional; required to activate an agent's project)
 
 ## Installation
@@ -138,7 +138,7 @@ require("super-tree").setup({
     enable = true, -- automatically shown while OpenCode V2 has live TUIs or agents
     height = 15, -- fits five three-row entries
     refresh_interval = 2000, -- milliseconds
-    command = "opencode2",
+    -- service_file = "~/.local/state/opencode/service.json", -- service registration override
     current_project_first = true, -- list the current project's agents first
     symbols = {
       working = "●",
@@ -146,6 +146,7 @@ require("super-tree").setup({
       question = "?",
       idle = "○",
       done = "✓",
+      none = "–", -- OpenCode server not running
       unknown = "?",
     },
   },
@@ -192,7 +193,7 @@ The file tree is always the last, flexible pane and cannot be moved. Any optiona
 
 ### Agents
 
-Automatically appears in its configured position while at least one full OpenCode V2 TUI process or unmatched active session exists (below Projects and above Buffers with the default `pane_order`). SuperTree asynchronously detects current-user `opencode2` TUI processes, excluding the background service and non-TUI commands, and reconciles them with `GET /api/session/active`. Active sessions show `blocked` while awaiting permission, `question` while awaiting an interactive question/form response, and otherwise show `working`. A newly detected TUI without an active agent is `idle`; after a known active task finishes, it becomes `done` and retains the task metadata until new work starts or the TUI exits. Active sessions without a matching TUI also remain visible. Historical sessions without a live TUI are not shown.
+Automatically appears in its configured position while at least one full OpenCode V2 TUI process or unmatched active session exists (below Projects and above Buffers with the default `pane_order`). SuperTree asynchronously detects current-user `opencode2` TUI processes, excluding the background service and non-TUI commands, and reconciles them with `GET /api/session/active`. Session queries go directly to the shared OpenCode background service over HTTP, using its registration file (`$XDG_STATE_HOME/opencode/service.json`, default `~/.local/state/opencode/service.json`) for the endpoint and credentials, so no OpenCode processes are spawned per refresh. SuperTree never starts the server; while it is not running, detected TUIs show `no status` and the agent row reads "OpenCode server not running". Active sessions show `blocked` while awaiting permission, `question` while awaiting a form (interactive question) response, and otherwise show `working`. A newly detected TUI without an active agent is `idle`; after a known active task finishes, it becomes `done` and retains the task metadata until new work starts or the TUI exits. Active sessions without a matching TUI also remain visible. Historical sessions without a live TUI are not shown.
 
 Discovery polls every two seconds by default and hides the pane only when a successful snapshot contains neither a TUI nor an active session. `R` refreshes immediately. Linux uses `/proc` for each TUI's working directory; systems without `/proc` fall back to `lsof` when available.
 
@@ -208,7 +209,7 @@ Each agent is a three-row entry:
 
 Agents working in the current project (their session or TUI directory is the active project root or nested under it) are listed first; all other agents keep their existing order. Set `agents.current_project_first = false` to keep the plain status-priority order regardless of the current project.
 
-Set `agents.enable = false` to disable the provider, `agents.height` to change its initial height (default 15, which fits five three-row entries), `agents.refresh_interval` to change polling frequency, or `agents.command` to use an explicit OpenCode V2 executable path. The default `opencode2` / `opencode` names are also resolved from `~/.opencode/bin` when a desktop-launched Neovim did not inherit that directory on `PATH`. Status symbols are configurable under `agents.symbols`; unknown future status values remain visible with neutral styling.
+Set `agents.enable = false` to disable the provider, `agents.height` to change its initial height (default 15, which fits five three-row entries), `agents.refresh_interval` to change polling frequency, or `agents.service_file` to read a non-default service registration. Status symbols are configurable under `agents.symbols`; unknown future status values remain visible with neutral styling.
 
 ### Projects
 
@@ -271,7 +272,7 @@ Refreshed in the background from directory watchers, git-dir watchers, and `BufW
 
 Sidebar background is darkened from `Normal` and re-derived on `:colorscheme`. Override `SuperTreeNormal` (also `SuperTreeNormalNC`, `SuperTreeEndOfBuffer`, `SuperTreeCursorLine`, `SuperTreeWinSeparator`).
 
-Git highlight groups: `SuperTreeGitAdded`, `SuperTreeGitDeleted`, `SuperTreeGitModified`, `SuperTreeGitRenamed`, `SuperTreeGitStaged`, `SuperTreeGitUnstaged`, `SuperTreeGitUntracked`, `SuperTreeGitIgnored`, `SuperTreeGitConflict`, `SuperTreeGitBranch`, `SuperTreeGitAheadBehind`, `SuperTreeGitClean`. Agent statuses use yellow `SuperTreeAgentWorking`, red `SuperTreeAgentBlocked`, blue `SuperTreeAgentQuestion`, `SuperTreeAgentWaiting`, `SuperTreeAgentIdle`, green `SuperTreeAgentDone`, `SuperTreeAgentError`, and `SuperTreeAgentUnknown`. Active project and buffer names use `SuperTreeProjectsCurrent` and `SuperTreeBuffersCurrent` (Special, bold).
+Git highlight groups: `SuperTreeGitAdded`, `SuperTreeGitDeleted`, `SuperTreeGitModified`, `SuperTreeGitRenamed`, `SuperTreeGitStaged`, `SuperTreeGitUnstaged`, `SuperTreeGitUntracked`, `SuperTreeGitIgnored`, `SuperTreeGitConflict`, `SuperTreeGitBranch`, `SuperTreeGitAheadBehind`, `SuperTreeGitClean`. Agent statuses use yellow `SuperTreeAgentWorking`, red `SuperTreeAgentBlocked`, blue `SuperTreeAgentQuestion`, `SuperTreeAgentWaiting`, `SuperTreeAgentIdle`, green `SuperTreeAgentDone`, `SuperTreeAgentError`, `SuperTreeAgentNone` (server not running), and `SuperTreeAgentUnknown`. Active project and buffer names use `SuperTreeProjectsCurrent` and `SuperTreeBuffersCurrent` (Special, bold).
 
 ### Icons
 

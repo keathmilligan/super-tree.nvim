@@ -64,15 +64,33 @@ local function run()
     string.format("9016 %d opencode2 opencode2 --log-level debug api get /api/session/active", uid),
   }, "\n")
 
+  -- Process discovery runs commands; session queries go to the registered
+  -- server over HTTP. `server_running = false` simulates a stale registration
+  -- whose server refuses connections.
+  local service_json = root .. "/service.json"
+  vim.fn.writefile({ encode({
+    id = "svc", version = "2.0.18", url = "http://127.0.0.1:49374", pid = 1, password = "secret",
+  }) }, service_json)
+  local server_running = true
+  local http_status
+
   local function runner(argv, _, callback)
-    local path
-    if argv[1] == "ps" then
-      path = "/processes"
-    elseif argv[1] == "lsof" then
-      path = "/lsof/" .. tostring(argv[4])
-    else
-      path = argv[4]
-    end
+    local path = argv[1] == "lsof" and ("/lsof/" .. tostring(argv[4])) or "/processes"
+    calls[path] = (calls[path] or 0) + 1
+    local cancelled = false
+    vim.schedule(function()
+      if cancelled then return end
+      if failures[path] then
+        callback(false, failures[path])
+      else
+        callback(true, responses[path] or "")
+      end
+    end)
+    return function() cancelled = true end
+  end
+
+  local function http(endpoint, path, _, callback)
+    check(endpoint.authorization == "Basic b3BlbmNvZGU6c2VjcmV0", "requests carry server credentials")
     calls[path] = (calls[path] or 0) + 1
     if path == "/api/session/active" and held == false then
       held = { callback = callback }
@@ -81,10 +99,12 @@ local function run()
     local cancelled = false
     vim.schedule(function()
       if cancelled then return end
-      if failures[path] then
+      if not server_running then
+        callback(false, "could not connect to OpenCode service: ECONNREFUSED", true)
+      elseif failures[path] then
         callback(false, failures[path])
       else
-        callback(true, responses[path] or "{}")
+        callback(true, { status = http_status or 200, body = responses[path] or "{}" })
       end
     end)
     return function() cancelled = true end
@@ -92,12 +112,15 @@ local function run()
 
   local function inject_provider()
     provider._set_runner(runner)
+    provider._set_http(http)
     provider._set_cwd_resolver(function(pid) return process_cwds[pid] end)
   end
 
-  local function collect(options)
+  local function collect(options, config)
     local result
-    provider.collect({ command = "fixture", metadata_refresh_interval = 0 }, options or {}, function(ok, value)
+    config = vim.tbl_extend("force", { service_file = service_json, metadata_refresh_interval = 0 },
+      config or {})
+    provider.collect(config, options or {}, function(ok, value)
       result = { ok = ok, value = value }
     end)
     wait_for(function() return result ~= nil end, "provider collection must finish")
@@ -142,17 +165,18 @@ local function run()
   responses["/api/session/ses_alpha/permission"] = encode({ data = {
     { id = "per_alpha", sessionID = "ses_alpha", action = "bash", resources = { "*" } },
   } })
-  responses["/api/session/ses_alpha/question"] = encode({ data = {} })
   responses["/api/session/ses_alpha/form"] = encode({ data = {
     { id = "frm_alpha", sessionID = "ses_alpha", title = "Choose deployment", fields = {} },
   } })
   responses["/api/session/ses_beta/permission"] = encode({ data = {} })
-  responses["/api/session/ses_beta/question"] = encode({ data = {} })
   responses["/api/session/ses_beta/form"] = encode({ data = {
     { id = "frm_beta", sessionID = "ses_beta", title = "Choose review mode", fields = {} },
   } })
 
+  calls = {}
   local parsed = collect({ force = true })
+  check(calls["/api/session/ses_alpha/question"] == nil and calls["/api/session/ses_alpha/form"] == 1,
+    "pending prompts are read from permissions and forms only")
   check(parsed.ok and #parsed.value == 4, "provider returns matched active and idle TUI instances")
   local by_pid = {}
   for _, entry in ipairs(parsed.value) do by_pid[entry.pid] = entry end
@@ -187,47 +211,112 @@ local function run()
     "timed-out active response is reported")
   failures["/api/session/active"] = nil
 
+  local endpoint = provider._read_endpoint(service_json)
+  check(endpoint and endpoint.host == "127.0.0.1" and endpoint.port == 49374
+      and endpoint.authorization == "Basic b3BlbmNvZGU6c2VjcmV0",
+    "service registration yields the endpoint and Basic credentials")
+
+  -- A server that is not running is a definite state: TUIs remain visible
+  -- without a status and stale session metadata is dropped.
+  responses["/processes"] = process_fixture
+  responses["/api/session/active"] = encode({ data = { ses_alpha = { type = "running" } } })
+  responses["/api/session/ses_alpha/permission"] = encode({ data = {} })
+  responses["/api/session/ses_alpha/form"] = encode({ data = {} })
+  collect({ force = true })
+  server_running = false
+  local stopped = collect({ force = true })
+  check(stopped.ok and #stopped.value == 4, "TUIs remain visible while the server is not running")
+  for _, entry in ipairs(stopped.value) do
+    check(entry.status == "none" and entry.session_id == nil
+        and entry.agent == "OpenCode server not running",
+      "TUIs show no status while the server is not running")
+  end
+  check(stopped.value[1].name:find("no status", 1, true), "no-status entries are filterable")
+  server_running = true
+  local restarted = collect({ force = true }, { service_file = service_json })
+  for _, entry in ipairs(restarted.value) do
+    if entry.pid == 9001 then
+      check(entry.status == "working", "status returns when the server is running again")
+    end
+  end
+  responses["/api/session/active"] = encode({ data = {} })
+  collect({ force = true })
+  server_running = false
+  collect({ force = true })
+  server_running = true
+  local after_restart = collect({ force = true })
+  for _, entry in ipairs(after_restart.value) do
+    check(entry.status == "idle", "completed tasks do not survive a server restart")
+  end
+
+  calls = {}
+  local unregistered = collect({ force = true }, { service_file = root .. "/missing-service.json" })
+  check(unregistered.ok and #unregistered.value == 4 and unregistered.value[1].status == "none"
+      and calls["/api/session/active"] == nil,
+    "missing registration shows no status without querying")
+  responses["/processes"] = ""
+  local nothing = collect({ force = true }, { service_file = root .. "/missing-service.json" })
+  check(nothing.ok and #nothing.value == 0, "no TUIs and no server yields an empty snapshot")
+
+  http_status = 401
+  responses["/processes"] = process_fixture
+  local rejected = collect({ force = true })
+  check(rejected.ok and rejected.value[1].status == "unknown",
+    "other server errors keep TUIs visible with unknown status")
+  http_status = nil
+
   provider._reset()
+  provider._set_http(http)
   local missing
   provider.collect({
-    command = "__super_tree_missing_opencode2__",
     process_command = "__super_tree_missing_ps__",
+    service_file = root .. "/missing-service.json",
   }, {}, function(ok, value)
     missing = { ok = ok, value = value }
   end)
-  wait_for(function() return missing ~= nil end, "missing executables settle")
-  check(not missing.ok, "missing OpenCode and process executables fail gracefully")
+  wait_for(function() return missing ~= nil end, "missing process command settles")
+  check(not missing.ok, "missing process command and server fail gracefully")
 
-  -- A desktop-launched Neovim does not inherit the shell rc PATH entry for
-  -- ~/.opencode/bin. Default CLI names must still reach that install.
-  provider._reset()
-  local saved_path, saved_home = vim.env.PATH, vim.env.HOME
-  local install_home = vim.fn.tempname()
-  local install_bin = install_home .. "/.opencode/bin"
-  vim.fn.mkdir(install_bin, "p")
-  local install_cli = install_bin .. "/opencode2"
-  vim.fn.writefile({ "#!/bin/sh", "exit 0" }, install_cli)
-  vim.fn.setfperm(install_cli, "rwxr-xr-x")
-  vim.env.HOME = install_home
-  vim.env.PATH = "/usr/bin:/bin"
-  local resolved_argv
-  provider._set_runner(function(argv, _, callback)
-    if argv[1] == "ps" then
-      vim.schedule(function() callback(true, "") end)
-    else
-      resolved_argv = argv
-      vim.schedule(function() callback(true, encode({ data = {} })) end)
-    end
-    return function() end
+  -- The built-in HTTP client against a local server: Content-Length and
+  -- chunked bodies, request path, and authorization header.
+  local server = vim.loop.new_tcp()
+  server:bind("127.0.0.1", 0)
+  local received = {}
+  server:listen(8, function()
+    local client = vim.loop.new_tcp()
+    server:accept(client)
+    local data = ""
+    client:read_start(function(_, chunk)
+      if not chunk then return end
+      data = data .. chunk
+      if not data:find("\r\n\r\n", 1, true) then return end
+      received[#received + 1] = data
+      local reply
+      if data:find("^GET /chunked ") then
+        reply = "HTTP/1.1 200 OK\r\nTransfer-Encoding: chunked\r\n\r\n"
+          .. "5\r\n{\"dat\r\n6\r\na\":{}}\r\n0\r\n\r\n"
+      else
+        reply = "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 11\r\n\r\n{\"data\":{}}"
+      end
+      client:write(reply, function() client:close() end)
+    end)
   end)
-  local resolved
-  provider.collect({ command = "opencode2" }, {}, function(ok, value)
-    resolved = { ok = ok, value = value }
-  end)
-  wait_for(function() return resolved ~= nil end, "install-dir fallback settles")
-  vim.env.PATH, vim.env.HOME = saved_path, saved_home
-  check(resolved.ok and resolved_argv and resolved_argv[1] == install_cli,
-    "default OpenCode command resolves under ~/.opencode/bin when PATH lacks it")
+  local live = { host = "127.0.0.1", port = server:getsockname().port, authority = "127.0.0.1",
+    base = "", authorization = "Basic abc" }
+  local plain, chunked, refused
+  provider._http_get(live, "/plain", { timeout = 1000 }, function(ok, value) plain = { ok, value } end)
+  provider._http_get(live, "/chunked", { timeout = 1000 }, function(ok, value) chunked = { ok, value } end)
+  wait_for(function() return plain and chunked end, "local HTTP requests finish")
+  server:close()
+  check(plain[1] and plain[2].status == 200 and plain[2].body == "{\"data\":{}}",
+    "HTTP client reads Content-Length bodies")
+  check(chunked[1] and chunked[2].body == "{\"data\":{}}", "HTTP client decodes chunked bodies")
+  check(received[1]:find("\r\nAuthorization: Basic abc\r\n", 1, true),
+    "HTTP client sends the authorization header")
+  provider._http_get(vim.tbl_extend("force", live, { port = 1 }), "/x", { timeout = 1000 },
+    function(ok, value, not_running) refused = { ok, value, not_running } end)
+  wait_for(function() return refused end, "refused connection settles")
+  check(not refused[1] and refused[3] == true, "refused connection is reported as not running")
 
   provider._reset()
   inject_provider()
@@ -320,13 +409,11 @@ local function run()
   responses["/api/session/ses_alpha/permission"] = encode({ data = {
     { id = "per_alpha", sessionID = "ses_alpha", action = "bash", resources = { "*" } },
   } })
-  responses["/api/session/ses_alpha/question"] = encode({ data = {} })
   responses["/api/session/ses_alpha/form"] = encode({ data = {} })
   responses["/api/session/ses_beta/permission"] = encode({ data = {} })
-  responses["/api/session/ses_beta/question"] = encode({ data = {
-    { id = "que_beta", sessionID = "ses_beta", questions = {} },
+  responses["/api/session/ses_beta/form"] = encode({ data = {
+    { id = "frm_beta", sessionID = "ses_beta", title = "Which review mode?", fields = {} },
   } })
-  responses["/api/session/ses_beta/form"] = encode({ data = {} })
 
   local agents = require("super-tree.agents")
   local window = require("super-tree.window")
@@ -339,7 +426,7 @@ local function run()
       enable = true,
       height = 9,
       refresh_interval = 60000,
-      command = "fixture",
+      service_file = service_json,
       symbols = { working = "W", unknown = "U" },
     },
     projects = { enable = true, height = 7 },
@@ -586,6 +673,26 @@ local function run()
   end
   check(working_hl, "working status uses its dedicated yellow highlight")
 
+  server_running = false
+  agents.refresh(true, false)
+  wait_for(function() return #agents.all == 1 and agents.all[1].status == "none" end,
+    "stopped server refreshes to no status")
+  local offline_lines = vim.api.nvim_buf_get_lines(window.agents_buf, 0, -1, false)
+  check(offline_lines[1]:find("– no status", 1, true) and offline_lines[1]:find("alpha", 1, true),
+    "stopped server renders a no-status indication")
+  check(offline_lines[3]:find("OpenCode server not running", 1, true),
+    "stopped server is explained on the agent row")
+  local none_hl
+  for _, mark in ipairs(vim.api.nvim_buf_get_extmarks(
+    window.agents_buf, -1, { 0, 0 }, { 0, -1 }, { details = true })) do
+    if mark[4].hl_group == "SuperTreeAgentNone" then none_hl = true end
+  end
+  check(none_hl, "no status uses its dedicated highlight")
+  server_running = true
+  agents.refresh(true, false)
+  wait_for(function() return #agents.all == 1 and agents.all[1].status == "working" end,
+    "status returns after the server restarts")
+
   -- Partial failure keeps the TUI visible with unknown status; total failure
   -- retains that last usable snapshot.
   failures["/api/session/active"] = "service unavailable"
@@ -607,7 +714,7 @@ local function run()
   wait_for(function() return type(held) == "table" end, "fixture holds an active request")
   local late = held.callback
   supertree.close()
-  late(true, encode({ data = { ses_beta = { type = "running" } } }))
+  late(true, { status = 200, body = encode({ data = { ses_beta = { type = "running" } } }) })
   vim.wait(50, function() return false end)
   check(not supertree.is_open() and not agents.is_running(), "late callback is ignored after close")
 
