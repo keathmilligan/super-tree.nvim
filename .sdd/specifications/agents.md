@@ -1,14 +1,14 @@
 ---
 feature: agents
 created: 2026-09-18
-updated: 2026-09-20
+updated: 2026-09-22
 ---
 
 # Agents
 
 | Created | Updated |
 | --- | --- |
-| 2026-09-18 | 2026-09-20 |
+| 2026-09-18 | 2026-09-22 |
 
 ## Purpose
 
@@ -141,7 +141,10 @@ Configuration SHALL support:
 - enabling or disabling Agents;
 - initial pane height, defaulting to 15 rows (five complete three-row entries);
 - refresh interval;
-- the OpenCode V2 executable, defaulting to `opencode2`;
+- the OpenCode V2 executable, defaulting to `opencode2`. When that default
+  name (or `opencode`) is not on `PATH`, SuperTree SHALL also try
+  `~/.opencode/bin`. An explicit configured command that cannot be executed
+  SHALL still fail rather than falling back;
 - current-project-first ordering, enabled by default; and
 - status symbols, including `running`, `idle`, and `unknown`.
 
@@ -155,3 +158,4 @@ Configuration SHALL support:
 | 2026-09-18 | Distinguished idle, working, and completed TUI states and colors |
 | 2026-09-19 | Made pane position configurable and defaulted the pane to 15 rows |
 | 2026-09-20 | Added current-project-first Agents ordering |
+| 2026-09-22 | Resolve the default OpenCode CLI from `~/.opencode/bin` when it is not on `PATH` |

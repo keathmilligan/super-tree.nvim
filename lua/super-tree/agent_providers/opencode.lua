@@ -97,6 +97,46 @@ local function command_argv(command, path)
   return { command, "api", "get", path }
 end
 
+local DEFAULT_COMMANDS = {
+  opencode = true,
+  ["opencode.exe"] = true,
+  opencode2 = true,
+  ["opencode2.exe"] = true,
+}
+
+-- Neovim launched from a desktop session often does not inherit the
+-- `~/.opencode/bin` PATH entry that the V2 installer adds to shell rc files.
+-- An explicit configured command that is missing still fails; only the default
+-- CLI names fall back to the official install directory.
+local function resolve_command(command)
+  command = command or "opencode2"
+  if vim.fn.executable(command) == 1 then
+    local found = vim.fn.exepath(command)
+    if type(found) == "string" and found ~= "" then return found end
+    return command
+  end
+  local name = command:match("([^/\\]+)$") or command
+  if not DEFAULT_COMMANDS[name] then return nil end
+  local home = vim.env.HOME
+  if type(home) ~= "string" or home == "" then
+    home = vim.fn.expand("~")
+  end
+  if type(home) ~= "string" or home == "" or home == "~" then return nil end
+  local candidates = {
+    home .. "/.opencode/bin/" .. name,
+    home .. "/.opencode/bin/opencode2",
+    home .. "/.opencode/bin/opencode",
+  }
+  local seen = {}
+  for _, path in ipairs(candidates) do
+    if not seen[path] then
+      seen[path] = true
+      if vim.fn.executable(path) == 1 then return path end
+    end
+  end
+  return nil
+end
+
 local function run_json(command, path, timeout, callback)
   local runner = injected_runner or default_runner
   return runner(command_argv(command, path), { timeout = timeout }, function(ok, output)
@@ -481,7 +521,8 @@ end
 function M.collect(config, opts, callback)
   config = config or {}
   opts = opts or {}
-  local command = config.command or "opencode2"
+  local configured_command = config.command or "opencode2"
+  local command = configured_command
   local timeout = tonumber(config.timeout) or 5000
   local refresh_age = tonumber(config.metadata_refresh_interval) or 30000
   local cancelled = false
@@ -535,8 +576,10 @@ function M.collect(config, opts, callback)
     finish_if_ready()
   end
 
-  if not injected_runner and vim.fn.executable(command) ~= 1 then
-    fail_sessions(command .. " is not executable")
+  local resolved = resolve_command(configured_command)
+  if resolved then command = resolved end
+  if not injected_runner and not resolved then
+    fail_sessions(configured_command .. " is not executable")
   else
     add_handle(run_json(command, "/api/session/active", timeout, function(ok, response)
       if cancelled then return end

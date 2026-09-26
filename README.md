@@ -24,7 +24,7 @@ A feature-rich Neovim file explorer with multi-repo git support, file operations
 - Neovim 0.8+
 - Nerd Font
 - `git` in `$PATH` (for git status)
-- `opencode2` in `$PATH` (optional; for the Agents pane)
+- `opencode2` in `$PATH`, or the standard `~/.opencode/bin` install (optional; for the Agents pane)
 - [super-project.nvim](https://github.com/keathmilligan/super-project.nvim) (optional; required to activate an agent's project)
 
 ## Installation
@@ -208,7 +208,7 @@ Each agent is a three-row entry:
 
 Agents working in the current project (their session or TUI directory is the active project root or nested under it) are listed first; all other agents keep their existing order. Set `agents.current_project_first = false` to keep the plain status-priority order regardless of the current project.
 
-Set `agents.enable = false` to disable the provider, `agents.height` to change its initial height (default 15, which fits five three-row entries), `agents.refresh_interval` to change polling frequency, or `agents.command` to use an explicit OpenCode V2 executable path. Status symbols are configurable under `agents.symbols`; unknown future status values remain visible with neutral styling.
+Set `agents.enable = false` to disable the provider, `agents.height` to change its initial height (default 15, which fits five three-row entries), `agents.refresh_interval` to change polling frequency, or `agents.command` to use an explicit OpenCode V2 executable path. The default `opencode2` / `opencode` names are also resolved from `~/.opencode/bin` when a desktop-launched Neovim did not inherit that directory on `PATH`. Status symbols are configurable under `agents.symbols`; unknown future status values remain visible with neutral styling.
 
 ### Projects
 

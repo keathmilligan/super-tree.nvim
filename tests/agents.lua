@@ -198,6 +198,37 @@ local function run()
   wait_for(function() return missing ~= nil end, "missing executables settle")
   check(not missing.ok, "missing OpenCode and process executables fail gracefully")
 
+  -- A desktop-launched Neovim does not inherit the shell rc PATH entry for
+  -- ~/.opencode/bin. Default CLI names must still reach that install.
+  provider._reset()
+  local saved_path, saved_home = vim.env.PATH, vim.env.HOME
+  local install_home = vim.fn.tempname()
+  local install_bin = install_home .. "/.opencode/bin"
+  vim.fn.mkdir(install_bin, "p")
+  local install_cli = install_bin .. "/opencode2"
+  vim.fn.writefile({ "#!/bin/sh", "exit 0" }, install_cli)
+  vim.fn.setfperm(install_cli, "rwxr-xr-x")
+  vim.env.HOME = install_home
+  vim.env.PATH = "/usr/bin:/bin"
+  local resolved_argv
+  provider._set_runner(function(argv, _, callback)
+    if argv[1] == "ps" then
+      vim.schedule(function() callback(true, "") end)
+    else
+      resolved_argv = argv
+      vim.schedule(function() callback(true, encode({ data = {} })) end)
+    end
+    return function() end
+  end)
+  local resolved
+  provider.collect({ command = "opencode2" }, {}, function(ok, value)
+    resolved = { ok = ok, value = value }
+  end)
+  wait_for(function() return resolved ~= nil end, "install-dir fallback settles")
+  vim.env.PATH, vim.env.HOME = saved_path, saved_home
+  check(resolved.ok and resolved_argv and resolved_argv[1] == install_cli,
+    "default OpenCode command resolves under ~/.opencode/bin when PATH lacks it")
+
   provider._reset()
   inject_provider()
   responses["/processes"] = ""
